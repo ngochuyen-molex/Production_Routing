@@ -10,6 +10,7 @@ SQL_COUNT = """
     FROM MLX_DATALAKE.MLX_SAP_ECC.MKAL
     WHERE MATNR IN ({placeholders})
         AND WERKS = %s
+        AND DW_SOFT_DELETE_FLAG = 0 -- only versions still in SAP
     GROUP BY MATNR
 """
 
@@ -23,6 +24,7 @@ SQL_BY_GROUP = """
     FROM MLX_DATALAKE.MLX_SAP_ECC.MKAL
     WHERE (MATNR, PLNNR, LPAD(ALNAL, 2, '0')) IN ({placeholders})
     AND WERKS = %s
+    AND DW_SOFT_DELETE_FLAG = 0 -- only versions still in SAP
     ORDER BY material, routing_group, group_counter
 """
 
@@ -32,6 +34,7 @@ SQL_BY_ATTRIBUTES = """
         SELECT MATNR, WERKS, VERID, TEXT1, PLNTY, PLNNR, ALNAL
         FROM MLX_DATALAKE.MLX_SAP_ECC.MKAL
         WHERE WERKS = %s AND MATNR IN ({placeholders})
+          AND DW_SOFT_DELETE_FLAG = 0 -- only versions still in SAP
     ),
     ops AS (
         SELECT pv.MATNR, pv.VERID, po.PLNNR, po.PLNKN, c.ARBPL
@@ -39,9 +42,11 @@ SQL_BY_ATTRIBUTES = """
         JOIN MLX_DATALAKE.MLX_SAP_ECC.PLAS pa
           ON pa.PLNTY = pv.PLNTY AND pa.PLNNR = pv.PLNNR AND pa.PLNAL = pv.ALNAL
          AND pa.LOEKZ = ''
+         AND pa.DW_SOFT_DELETE_FLAG = 0 -- deleted sequences
         JOIN MLX_DATALAKE.MLX_SAP_ECC.PLPO po
           ON po.PLNTY = pa.PLNTY AND po.PLNNR = pa.PLNNR AND po.PLNKN = pa.PLNKN
          AND po.ZAEHL = pa.ZAEHL
+         AND po.DW_SOFT_DELETE_FLAG = 0 -- deleted operations
         JOIN MLX_DATALAKE.MLX_SAP_ECC.CRHD c
           ON c.OBJID = po.ARBID AND c.OBJTY = 'A'
     ),
@@ -61,6 +66,24 @@ SQL_BY_ATTRIBUTES = """
     FROM pv
     JOIN ops o ON o.MATNR = pv.MATNR AND o.VERID = pv.VERID
     LEFT JOIN prt p ON p.PLNNR = o.PLNNR AND p.PLNKN = o.PLNKN
+"""
+
+
+# Production versions still in SAP, with the routing and alternative BOM they point to
+SQL_BY_ROUTING = """
+    SELECT
+        LTRIM(MATNR, '0')  AS material,
+        PLNNR               AS routing_group,
+        LTRIM(ALNAL, '0')   AS group_counter,
+        LTRIM(STLAL, '0')   AS alt_bom,
+        VERID               AS production_version,
+        TEXT1               AS description,
+        MKSP                AS lock_status   -- ' ' = not locked
+    FROM MLX_DATALAKE.MLX_SAP_ECC.MKAL
+    WHERE WERKS = %s
+        AND PLNTY = 'N'
+        AND DW_SOFT_DELETE_FLAG = 0 -- permanently deleted versions (e.g. 0006-0008 of 5013300800)
+        AND MATNR IN ({placeholders})
 """
 
 
@@ -91,3 +114,12 @@ def by_attributes(conn, materials, plant=PLANT):
         conn, SQL_BY_ATTRIBUTES, [to_sap_matnr(m) for m in materials], params_before=[plant],
         columns=["MATERIAL", "PRODUCTION_VERSION", "DESCRIPTION", "ROUTING_GROUP",
                  "GROUP_COUNTER", "RESOURCE", "PRT"])
+
+
+def by_routing(conn, materials, plant=PLANT):
+    """Live production versions with routing + alt BOM (materials / counters / alt BOM without leading zeros).
+    Used by: checks/pv_exist.py"""
+    return query_in_batches(
+        conn, SQL_BY_ROUTING, [to_sap_matnr(m) for m in materials], params_before=[plant],
+        columns=["MATERIAL", "ROUTING_GROUP", "GROUP_COUNTER", "ALT_BOM", "PRODUCTION_VERSION",
+                 "DESCRIPTION", "LOCK_STATUS"])

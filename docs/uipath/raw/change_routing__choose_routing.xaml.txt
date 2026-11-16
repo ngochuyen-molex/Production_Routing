@@ -1,0 +1,58 @@
+ARG row_index: OutArgument(x:Int32)
+ARG tool: InArgument(x:String)
+ARG resource: InArgument(x:String)
+Sequence 'find_routing_tochangebom'
+  NApplicationCard 'Change Routing Initial Screen' [AttachMode=ByInstance]
+    Sequence 'Do'
+      vars: change_routing_list:sd4:DataTable, row_index_change:x:Int32=0
+      NCheckState 'Check task routing BIG list pop up'
+        IfExists:
+          Sequence 'Target appears'
+            NExtractDataGeneric 'Extract Table Data header big' [TypeArguments=sd2:DataTable5, ExtractDataSettings=<Table ...>, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[change_routing_list], LimitExtractionTo=None, MaximumResults=0]
+                @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1200' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Overview' />
+            Assign
+              To: [row_index_change]
+              Value: [change_routing_list.AsEnumerable().ToList().FindIndex(Function(r) r("Task list description").ToString.ToUpper.Contains(resource.ToUpper) AndAlso (String.IsNullOrWhiteSpace(tool) OrElse r("Task list description").ToString.ToUpper.Contains(tool.ToUpper)) AndAlso Not r("Task list description").ToString.ToUpper.Contains("TRIAL"))]
+            If [Condition=[row_index_change =-1]]
+              Then:
+                Sequence 'Then'
+                  NClick 'Click 'Button Save (Ctrl+S)'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  Assign
+                    To: [row_index]
+                    Value: [-1]
+              Else:
+                Sequence 'Else'
+                  NClick 'Click row to choose routing' [ClickType=Double]
+                      @ FullSelectorArgument=[string.Format("<sap id='usr/tblSAPLCPDITCTRL_1200' tableCol='1' tableRow='{0}' />", row_index_change)] | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Overview' />
+                  Assign
+                    To: [row_index]
+                    Value: [1]
+        IfNotExists:
+          Sequence 'Target does not appear'
+            NCheckState 'Check task list small pop up' [EnableIfNotExists=False]
+              IfExists:
+                Sequence 'Target appears'
+                  NExtractDataGeneric 'Extract Table Data small pop up' [TypeArguments=sd3:DataTable4, ExtractDataSettings=<Table ...>, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[change_routing_list], LimitExtractionTo=None, MaximumResults=0]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCPSLTCTRL_2110' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Entry Option: Group' idx='*' />
+                  Assign
+                    To: [row_index_change]
+                    Value: [change_routing_list.AsEnumerable().ToList().FindIndex(Function(r) r("Task list description").ToString.Contains(resource) AndAlso r("Task list description").ToString.Contains(tool))]
+                  NClick 'Click 'MF50-11-559173200-L5591…'' [ClickType=Double]
+                      @ FullSelectorArgument=[string.Format("<sap id='usr/tblSAPLCPSLTCTRL_2110' tableCol='2' tableRow='{0}' />", row_index_change)] | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Entry Option: Group' idx='*' />
+                  NExtractDataGeneric 'Extract Table Data 'TableControl Header ove…(1)'' [TypeArguments=sd2:DataTable5, ExtractDataSettings=<Table ...>, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[change_routing_list], LimitExtractionTo=None, MaximumResults=0]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1200' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Overview' />
+                  Assign
+                    To: [row_index_change]
+                    Value: [change_routing_list.AsEnumerable().ToList().FindIndex(Function(r) r("Task list description").ToString.ToUpper.Contains(resource.ToUpper) AndAlso r("Task list description").ToString.ToUpper.Contains(tool.ToUpper) AndAlso Not r("Task list description").ToString.ToUpper.Contains("TRIAL"))]
+                  NClick 'Click row to choose routing' [ClickType=Double]
+                      @ FullSelectorArgument=[string.Format("<sap id='usr/tblSAPLCPDITCTRL_1200' tableCol='1' tableRow='{0}' />", row_index_change)] | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Overview' />
+              IfNotExists:
+                Sequence 'Target does not appear'
+                @ ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Entry Option: Group' idx='*' />
+          @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1200' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Overview' />
+      Assign
+        To: [row_index]
+        Value: [row_index_change]
+      @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION'/>
+      @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

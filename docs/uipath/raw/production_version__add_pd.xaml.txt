@@ -1,0 +1,36 @@
+ARG in_sort_lub: InArgument(x:String)
+ARG alt_bom_ver: InArgument(x:String)
+ARG material: InArgument(x:String)
+ARG group_counter: InArgument(x:String)
+ARG group: InArgument(x:String)
+ARG resource: InArgument(x:String)
+ARG tool: InArgument(x:String)
+ARG alt_bom_count: InArgument(x:Int32)
+Sequence 'product_version'
+  vars: bom_ver_counter:x:Int32
+  NApplicationCard 'Change Material (Initial Screen)' [AttachMode=ByInstance]
+    Sequence 'Do'
+      vars: new_ver:x:String, product_version_table:sd2:DataTable, pervious_version:x:String, max_ver:x:Int32=0, CurrentIndex:x:Int32=0
+      If [Condition=[alt_bom_ver.ToUpper() <> "ALL BOM"]]
+        Then:
+          Sequence 'Then'
+            LogMessage 'Log Message' [Level=Info, Message=["branch if not all bom"]]
+            InvokeWorkflowFile 'add_production_detail - Invoke Workflow File (production_version\add_production_detail.xaml)' [WorkflowFileName=production_version\add_production_detail.xaml]
+              args: bom_alt(In)=[alt_bom_ver]; group_counter(In)=[group_counter]; group(In)=[group]; tool(In)=[tool]; resource(In)=[resource]; sorting(In)=[in_sort_lub]
+        Else:
+          Sequence 'Else'
+            LogMessage 'Log Message' [Level=Info, Message=["BRANCH MAIN" +"and alt bom count" +alt_bom_count.ToString]]
+            RepeatNumberOfTimesX 'Repeat Number of Times' [NumberOfTimes=[alt_bom_count], StartAt=1]
+              Sequence 'Do'
+                vars: new_ver:x:String, product_version_table:sd2:DataTable, pervious_version:x:String, max_ver:x:Int32=0, current_bom:x:Int32=0
+                Assign
+                  To: [bom_ver_counter]
+                  Value: [(bom_ver_counter+1)]
+                Assign
+                  To: [alt_bom_ver]
+                  Value: [bom_ver_counter.ToString]
+                LogMessage 'Log Message' [Level=Trace, Message=["iteration "+ (alt_bom_ver).toString]]
+                InvokeWorkflowFile 'add_production_detail - Invoke Workflow File (production_version\add_production_detail.xaml)' [WorkflowFileName=production_version\add_production_detail.xaml]
+                  args: bom_alt(In)=[alt_bom_ver]; group_counter(In)=[group_counter]; group(In)=[group]; tool(In)=[tool]; resource(In)=[resource]; sorting(In)=[in_sort_lub]
+      @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' />
+      @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

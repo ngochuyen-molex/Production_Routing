@@ -3,6 +3,9 @@
 SAP routing checks (Snowflake) that run before the UiPath routing automation, and
 OpCenter upload-file generators (Tool Plan Matrix, workflows).
 
+Planned: move the SAP data entry from UiPath to Python. Context, decisions and next steps:
+[`docs/python_migration.md`](docs/python_migration.md).
+
 ## Setup (once)
 
 ```powershell
@@ -34,16 +37,28 @@ routing list
 routing check routing-condition FILE [-o OUT]
 routing check alt-bom FILE
 routing check delete-status FILE
-routing check operation-capacity FILE [--sheet Sheet1]
-routing check util-eff FILE
+routing check operation-values FILE [--sheet Sheet1]
 routing check routings-by-tool FILE
 routing check tpm-exist FILE
-routing check pv-count | pv-by-group | pv-by-attributes | pv-fallback FILE
+routing check pv-count | pv-by-group | pv-by-attributes | pv-fallback FILE [--sheet Sheet1]
+ne_routing check pv-exist FILE [-o OUT] [--sheet Sheet1]
 routing opc add-tpm | add-workflow | compare-workflow | delete-tpm |
-            update-ideal-cycle-time | update-tpm-priority  [-i INPUT] [-o OUTPUT]
+            update-tpm-priority  [-i INPUT] [-o OUTPUT]
 ```
 
 If FILE is left out you are asked for it (drag & drop works).
+
+`pv-exist` checks whether the production version for each row's routing (`group` + `group counter`,
+filled by `routing-condition` / `pre-uipath`) and `Alt Bom` already exists. It adds `PV_FOUND` and
+`PV_CHECK` (`Exists` / `Missing`; `ALL BOM` rows are not checked yet, only listed) and writes back
+into FILE unless `-o` is given. Production version commands, rules and the open ALL BOM concern:
+[`docs/production_version.md`](docs/production_version.md).
+
+`operation-values` checks the routing operations in one pass: base quantity at production /
+sorting / final step, the standard values (setup, machine, labor must be `1.000 H` at 0020) and
+efficiency / utilization. Rules, documented exceptions and known gaps:
+[`docs/operation_values.md`](docs/operation_values.md). It replaces the former
+`operation-capacity` and `util-eff` commands, which still work as aliases.
 
 ## Use from other code
 

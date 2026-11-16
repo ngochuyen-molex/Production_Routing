@@ -1,0 +1,46 @@
+ARG row_index: InArgument(x:Int32)
+Sequence 'delete_routing'
+  vars: variable1:x:String
+  ExcelProcessScopeX 'Excel Process Scope'
+    Sequence 'Do'
+      ExcelApplicationCard 'Use Excel File' [AutoSave=False, CreateNewFile=False, ResizeWindow=None, WorkbookPath=C:\Users\nguyeb3\Downloads\change_wc.xlsx]
+        Sequence 'Do'
+          ExcelForEachRowX 'For Each Excel Row' [EmptyRowBehavior=Stop, HasHeaders=True, Range=[Excel.Sheet("Sheet1")], SaveAfterEachRow=False]
+            Sequence 'Do'
+              NApplicationCard 'Change Routing Initial Screen' [AttachMode=ByInstance]
+                Sequence 'Do'
+                  vars: machine_name:x:String, bom_usage:x:String, ex_tool:x:String, ex_resource:x:String, CurrentIndex:x:Int32=0
+                  NTypeInto 'Type Into ''CTextField Material''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Material").ToString]]
+                      @ FullSelectorArgument=<sap id='usr/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Initial Screen' />
+                  NTypeInto 'Type Into '''1901''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=1901[k(enter)]]
+                      @ FullSelectorArgument=<sap id='usr/ctxt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Initial Screen' />
+                  Assign
+                    To: [ex_tool]
+                    Value: [If(CurrentRow("Tool").RawValue Is Nothing, "", CurrentRow("Tool").RawValue.ToString().Trim())]
+                  Assign
+                    To: [ex_resource]
+                    Value: [If(CurrentRow("Resource before").RawValue Is Nothing, "", CurrentRow("Resource before").RawValue.ToString().Trim())]
+                  InvokeWorkflowFile 'find_routing' [WorkflowFileName=delete_routing\choose_routing.xaml]
+                    args: tool(In)=[ex_tool]; resource(In)=[ex_resource]; row_index(Out)=[row_index]
+                  NTypeInto 'for plating' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Resource after")]]
+                      @ FullSelectorArgument=<sap colTooltip='Work Center' id='usr/tblSAPLCPDITCTRL_1400' tableRow='1' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  CommentOut 'Comment Out'
+                    Sequence 'Ignored Activities'
+                      NTypeInto 'Type Into 'IF30-02'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Resource after")]]
+                          @ FullSelectorArgument=<sap colTooltip='Work Center' id='usr/tblSAPLCPDITCTRL_1400' tableRow='2' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  NClick 'Click 'M65-F30 S2000i-30A'' [ClickType=Double]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1400' tableCol='6' tableRow='2' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  NGetText 'Get Text 'IF30-02 Injection'' [TextString=[machine_name]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/txt[2]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Details' />
+                  NTypeInto 'Type Into 'M65-F30 S2000i-30A'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[machine_name]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/txt[4]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Details' />
+                  NClick 'Click 'Button Back (F3)(1)'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[3]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Details' />
+                  NClick 'click header' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[5]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  NTypeInto 'Type Into 'IF30-02 - 5016441411 - …'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Resource after").ToString+" - "+ CurrentRow("Material").ToString+" - "+ CurrentRow("Tool").ToString]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/txt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Header Details' />
+                  NClick 'Click 'Button Save (Ctrl+S)'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Routing: Operation Overview' />
+                  @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION'/>
+                  @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

@@ -1,0 +1,43 @@
+ARG sorting: InArgument(x:String)
+ARG bom_alt: InArgument(x:String)
+ARG group_counter: InArgument(x:String)
+ARG group: InArgument(x:String)
+ARG tool: InArgument(x:String)
+ARG resource: InArgument(x:String)
+Sequence 'test'
+  NApplicationCard 'Change Material (Initial Screen)' [AttachMode=ByInstance]
+    Sequence 'Do'
+      vars: new_ver:x:String, product_version_table:sd2:DataTable, pervious_version:x:String, max_ver:x:Int32=0
+      NExtractDataGeneric 'Extract Table Data 'TableControl Production…'' [TypeArguments=sd2:DataTable, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[product_version_table], LimitExtractionTo=None, MaximumResults=0]
+          @ FullSelectorArgument=<sap id='usr/tblSAPLMDIAT_MKAL_NEW' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+      Assign
+        To: [max_ver]
+        Value: [product_version_table.AsEnumerable(). Where(Function(r) Not String.IsNullOrWhiteSpace(r(0).ToString) AndAlso CInt(r(0).ToString) < 5000). Select(Function(r) CInt(r(0).ToString)). DefaultIfEmpty(0). Max()]
+      NClick 'Click ''New Details''' [ClickType=Single]
+          @ FullSelectorArgument=<sap id='tbar[0]/btn[7]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+      NTypeInto 'Type Into ''CTextField Production V…''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[(max_ver + 1).ToString("0000")]]
+          @ FullSelectorArgument=<sap id='usr/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into VALID from' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[Now.ToString("yyyy/MM/dd")]]
+          @ FullSelectorArgument=<sap id='usr/ctxt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into ''CTextField Valid to''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=9999/12/31]
+          @ FullSelectorArgument=<sap id='usr/ctxt[2]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into ''TextField Production Ve…''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[resource +If(tool = "0" OrElse String.IsNullOrWhiteSpace(tool), "", " - " + tool) + If(String.IsNullOrWhiteSpace(sorting), "", " - " + sorting) +" B" + bom_alt]]
+          @ FullSelectorArgument=<sap id='usr/txt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into 'Routing'' [AlterIfDisabled=True, ClickBeforeMode=None, ClipboardMode=Never, Text=N]
+          @ FullSelectorArgument=<sap id='usr/cmb[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into group' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[group]]
+          @ FullSelectorArgument=<sap id='usr/ctxt[3]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into group counter' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[group_counter]]
+          @ FullSelectorArgument=<sap id='usr/txt[4]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into alt bom' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[bom_alt]]
+          @ FullSelectorArgument=<sap id='usr/ctxt[6]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NTypeInto 'Type Into bom usage=1' [ClickBeforeMode=Single, ClipboardMode=Never, Text=1]
+          @ FullSelectorArgument=<sap id='usr/ctxt[7]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NClick 'Click ''Check''' [ClickType=Single]
+          @ FullSelectorArgument=<sap id='usr/btn' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NClick 'Click ''Button Cancel (F12)''' [ClickType=Single]
+          @ FullSelectorArgument=<sap id='tbar[0]/btn[12]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      NClick 'Click ''Continue''' [ClickType=Single]
+          @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Details' idx='*' />
+      @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' />
+      @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

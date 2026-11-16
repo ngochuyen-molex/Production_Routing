@@ -1,0 +1,55 @@
+Sequence 'product_version'
+  vars: resource:x:String
+  NApplicationCard 'Change Material (Initial Screen)' [AttachMode=ByInstance]
+    Sequence 'Do'
+      vars: tool:x:String, product_version_table:sd2:DataTable, row_index:x:Int32=0, CurrentIndex:x:Int32=0
+      ExcelProcessScopeX 'Excel Process Scope'
+        Sequence 'Body'
+          ExcelApplicationCard 'Use Excel File' [AutoSave=False, CreateNewFile=False, ResizeWindow=None, WorkbookPath=C:\Users\nguyeb3\Downloads\Delete prod ver.xlsx]
+            Sequence 'Body'
+              vars: number_of_bom:x:Int32=0
+              ExcelForEachRowX 'For Each Excel Row' [EmptyRowBehavior=Stop, HasHeaders=True, Range=[Excel.Sheet("Sheet1")], SaveAfterEachRow=False]
+                Sequence 'Body'
+                  If [Condition=[CurrentRow("progress").ToString="done mm02"]]
+                    Then:
+                      Sequence 'Then'
+                        Continue
+                    Else:
+                      Sequence 'Else'
+                  NTypeInto 'Type Into MATERIAL NUMBER' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[string.Format("{0}[k(enter)]", CurrentRow("Material").ToString)]]
+                      @ FullSelectorArgument=<sap id='usr/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Material (Initial Screen)' />
+                  NKeyboardShortcuts 'Keyboard Shortcuts' [ClickBeforeMode=None, Shortcuts=[d(hk)][k(Enter)][u(hk)]]
+                  NClick 'Click ''Button Continue (Enter)''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Organizational Levels' idx='*' />
+                  NClick 'Click ''ProdVersions''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='usr/sub?6/btn' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Material 5051092489 (MRP 2, Semi-finished product)' />
+                  NExtractDataGeneric 'Extract Table Data 'TableControl Production…'' [TypeArguments=sd2:DataTable, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[product_version_table], LimitExtractionTo=None, MaximumResults=0]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLMDIAT_MKAL_NEW' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+                  ForEachRow 'For Each Row in Data Table' [CurrentIndex=[row_index], DataTable=[product_version_table]]
+                    Sequence 'Body'
+                      If [Condition=[String.IsNullOrWhiteSpace(CurrentRow("Text").ToString)]]
+                        Then:
+                          Sequence 'Then'
+                            CommentOut 'Comment Out'
+                              Sequence 'Ignored Activities'
+                                NClick 'Click 'Continue'' [ClickType=Single]
+                                    @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+                                NClick 'Click ''Button Save (Ctrl+S)''' [ClickType=Single]
+                                    @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Material 5051092289 (MRP 2, Semi-finished product)' />
+                            Break
+                        Else:
+                          Sequence 'Else'
+                            Assign
+                              To: [row_index]
+                              Value: [0]
+                            NClick 'click pd version' [ClickType=Single]
+                                @ FullSelectorArgument=[string.Format("<sap id='usr/tblSAPLMDIAT_MKAL_NEW' tableCol='1' tableRow='{0}' />", row_index)] | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+                            NClick 'Click 'Delete'' [ClickType=Single]
+                                @ FullSelectorArgument=<sap id='tbar[0]/btn[14]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+                  NClick 'Click 'Continue'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Production Version Overview' idx='*' />
+                  NClick 'Click ''Button Save (Ctrl+S)''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Change Material 5051092289 (MRP 2, Semi-finished product)' />
+                  WriteCellX 'Write Cell' [Cell=[CurrentRow("progress")], Value=["done"]]
+      @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' />
+      @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

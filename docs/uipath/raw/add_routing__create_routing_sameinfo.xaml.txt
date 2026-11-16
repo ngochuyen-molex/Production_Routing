@@ -1,0 +1,84 @@
+ARG row_index: InArgument(x:Int32)
+Sequence 'create_routing'
+  vars: resource_desc:x:String, tool_desc:x:String, groupcounter:x:String, group:x:String
+  ExcelProcessScopeX 'Excel Process Scope'
+    Sequence 'Body'
+      ExcelApplicationCard 'Use Excel File' [CreateNewFile=False, ResizeWindow=None, WorkbookPath=C:\Users\nguyeb3\Downloads\adding_routing.xlsx]
+        Sequence 'Body'
+          ExcelForEachRowX 'For Each Excel Row' [EmptyRowBehavior=Stop, HasHeaders=True, Range=[Excel.Sheet("Sheet1")], SaveAfterEachRow=False]
+            Sequence 'Body'
+              NApplicationCard 'Create Routing Initial Screen' [AttachMode=ByInstance, CloseMode=Never, OpenMode=IfNotOpen]
+                Sequence 'Do'
+                  vars: tool:x:String, resource:x:String, CurrentIndex:x:Int32=0
+                  CommentOut 'Comment Out'
+                    Sequence 'Ignored Activities'
+                      If [Condition=[CurrentRow("skip").ToString.Trim <> "0"]]
+                        Then:
+                          Sequence 'Then'
+                            Continue
+                        Else:
+                          Sequence 'Else'
+                  NTypeInto 'Type Into ''CTextField Material''' [ClickBeforeMode=Double, ClipboardMode=Always, Text=[CurrentRow("Material").ToString]]
+                      @ FullSelectorArgument=<sap id='usr/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Initial Screen' />
+                  NTypeInto 'Type Into '''1901''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=1901]
+                      @ FullSelectorArgument=<sap id='usr/ctxt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Initial Screen' />
+                  NClick 'Click ''Copy from''' [ClickType=Double]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[5]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Initial Screen' />
+                  InvokeWorkflowFile 'nested_find_copy_routing - Invoke Workflow File (nested_find_copy_routing.xaml)' [WorkflowFileName=add_routing\nested_find_copy_routing.xaml]
+                    args: material(In)=[CurrentRow("Material").toString]; resource(In)=[CurrentRow("Resource").toString]
+                  NCheckState 'Check App State 'Choose Alternative BOM(1)''
+                    IfExists:
+                      Sequence 'Target appears'
+                        NClick 'double click bom 1' [ClickType=Double]
+                            @ FullSelectorArgument=<sap id='usr/sub?1/txt[0,8]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Choose Alternative BOM' idx='*' />
+                    IfNotExists:
+                      Sequence 'Target does not appear'
+                        NClick 'Click 'Get group(1)'' [ClickType=Single]
+                            @ FullSelectorArgument=<sap id='usr/sub?2/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Data Check' />
+                      @ FullSelectorArgument=<sap id='usr/sub?1/txt[0,8]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Choose Alternative BOM' idx='*' />
+                  Delay [Duration=00:00:01]
+                  NGetText 'Get group' [TextString=[group]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/ctxt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Data Check' />
+                  NGetText 'Get group counter' [TextString=[groupcounter]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/txt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Data Check' />
+                  WriteCellX 'Write Cell' [Cell=[CurrentRow("group")], Value=[group]]
+                  WriteCellX 'Write Cell' [Cell=[CurrentRow("group counter")], Value=[groupcounter]]
+                  NTypeInto 'Type Into status ''1 ''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=4[k(Enter)]]
+                      @ FullSelectorArgument=<sap id='usr/sub?6/ctxt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Details' />
+                  NTypeInto 'type Into WorkCenter Resource'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Resource")]]
+                      @ FullSelectorArgument=<sap colTooltip='Work Center' id='usr/tblSAPLCPDITCTRL_1400' tableRow='2' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NGetText 'Get Text workcenter tool'' [TextString=[tool]]
+                      @ FullSelectorArgument=<sap colTooltip='Work Center' id='usr/tblSAPLCPDITCTRL_1400' tableRow='3' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NClick 'Click 'Button Header (F5)'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[5]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NTypeInto 'Type Into 'Type Into(1)'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=[CurrentRow("Resource")+" - "+ CurrentRow("Material")+" - "+ tool]]
+                      @ FullSelectorArgument=<sap id='usr/sub?2/txt[1]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Data Check' />
+                  NClick 'Click 'Operations'' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[7]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Header Details' />
+                  NTypeInto 'Type Into '4,500'' [ClickBeforeMode=Single, ClipboardMode=Always, Text=[CurrentRow("Capacity")]]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1400' tableCol='5' tableRow='1' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NTypeInto 'Type Into '4,500'' [ClickBeforeMode=Single, ClipboardMode=Always, Text=[CurrentRow("Capacity")]]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCPDITCTRL_1400' tableCol='5' tableRow='2' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NClick 'Click ''CompAlloc''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[7]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Operation Overview' />
+                  NCheckState 'Check App State 'Choose Alternative BOM''
+                    IfExists:
+                      Sequence 'Target appears'
+                        NClick 'Click 'Click bom pop up while create'' [ClickType=Double]
+                            @ FullSelectorArgument=<sap id='usr/sub?1/txt[0,8]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Choose Alternative BOM' idx='*' />
+                    IfNotExists:
+                      Sequence 'Target does not appear'
+                      @ FullSelectorArgument=<sap id='usr/sub?1/txt[0,8]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='Choose Alternative BOM' idx='*' />
+                  NClick 'Click ''Checkbox''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='usr/tblSAPLCMDITCTRL_1000' tableRow='0' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title=' Material Component Overview' />
+                  NClick 'Click ''New Assignment''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[1]/btn[5]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title=' Material Component Overview' />
+                  NTypeInto 'Type Into ''TextField Activity''' [ClickBeforeMode=Single, ClipboardMode=Never, Text=0020]
+                      @ FullSelectorArgument=<sap id='usr/txt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='New Assignment' idx='*' />
+                  NClick 'Click ''Button Continue (Enter)''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='New Assignment' idx='*' />
+                  NClick 'Click ''Button Save (Ctrl+S)''' [ClickType=Single]
+                      @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title=' Material Component Overview' />
+                  WriteCellX 'Write Cell' [Cell=[CurrentRow("skip")], Value=[1]]
+                  @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Create Routing: Initial Screen' />
+                  @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

@@ -20,14 +20,17 @@ CHECKS = {
     "routing-condition": ("routing.checks.routing_condition", "run", False),
     "alt-bom": ("routing.checks.alt_bom", "run", False),
     "delete-status": ("routing.checks.delete_status", "run", False),
-    "operation-capacity": ("routing.checks.operation_capacity", "run", True),
-    "util-eff": ("routing.checks.util_eff", "run", True),
+    "operation-values": ("routing.checks.operation_values", "run", True),
+    # old command names, kept so existing scripts / UiPath calls keep working
+    "operation-capacity": ("routing.checks.operation_values", "run", True),
+    "util-eff": ("routing.checks.operation_values", "run", True),
     "routings-by-tool": ("routing.checks.routings_by_tool", "run", False),
     "tpm-exist": ("routing.checks.tpm_exist", "run", True),
     "pv-count": ("routing.checks.production_version", "run_count", True),
     "pv-by-group": ("routing.checks.production_version", "run_by_group", True),
     "pv-by-attributes": ("routing.checks.production_version", "run_by_attributes", True),
     "pv-fallback": ("routing.checks.production_version", "run_with_fallback", True),
+    "pv-exist": ("routing.checks.pv_exist", "run", True),
 }
 
 OPC = {
@@ -35,12 +38,11 @@ OPC = {
     "add-workflow": "routing.opc.add_workflow",
     "compare-workflow": "routing.opc.compare_workflow",
     "delete-tpm": "routing.opc.delete_tpm",
-    "update-ideal-cycle-time": "routing.opc.update_ideal_cycle_time",
     "update-tpm-priority": "routing.opc.update_tpm_priority",
 }
 
 # run() functions without an output_path argument
-NO_OUTPUT = {"util-eff"}
+NO_OUTPUT = set()
 
 
 def _load(module, function):

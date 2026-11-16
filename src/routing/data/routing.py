@@ -30,7 +30,8 @@ SQL_ROUTINGS_WITH_RESOURCE = """
         cr.ARBPL AS RESOURCE,
         pk.KTEXT AS ROUTING_DESCRIPTION,
         pk.PLNNR AS ROUTING_GROUP,
-        pk.PLNAL AS GROUP_COUNTER
+        pk.PLNAL AS GROUP_COUNTER,
+        pk.DELKZ AS DELETION_FLAG -- 'X' = deletion flag ticked, can be unticked in SAP
     FROM MLX_DATALAKE.MLX_SAP_ECC.MAPL mp
     JOIN MLX_DATALAKE.MLX_SAP_ECC.PLKO pk
         ON mp.MANDT = pk.MANDT
@@ -54,6 +55,8 @@ SQL_ROUTINGS_WITH_RESOURCE = """
     WHERE pk.WERKS = %s
         AND pk.LOEKZ = ' '
         AND mp.LOEKZ = ' '
+        -- no DELKZ filter: flagged routings count as existing (reactivate instead of re-create);
+        -- permanently deleted ones are gone via DW_SOFT_DELETE_FLAG
         AND pk.DW_SOFT_DELETE_FLAG = 0
         AND mp.DW_SOFT_DELETE_FLAG = 0
         AND mp.MATNR IN ({placeholders})
@@ -176,12 +179,13 @@ def materials_at_plant(conn, materials, plant=PLANT):
 
 
 def routings_with_resource(conn, materials, plant=PLANT):
-    """All active routings + their work centers.
-    Columns: MATNR, RESOURCE, ROUTING_DESCRIPTION, ROUTING_GROUP, GROUP_COUNTER.
+    """Routings still in SAP (active or deletion-flagged) + their work centers.
+    Columns: MATNR, RESOURCE, ROUTING_DESCRIPTION, ROUTING_GROUP, GROUP_COUNTER, DELETION_FLAG.
     Used by: checks/routing_condition.py"""
     return query_in_batches(
         conn, SQL_ROUTINGS_WITH_RESOURCE, _matnrs(materials), params_before=[plant],
-        columns=["MATNR", "RESOURCE", "ROUTING_DESCRIPTION", "ROUTING_GROUP", "GROUP_COUNTER"])
+        columns=["MATNR", "RESOURCE", "ROUTING_DESCRIPTION", "ROUTING_GROUP", "GROUP_COUNTER",
+                 "DELETION_FLAG"])
 
 
 def deleted_status_0020(conn, materials, resources, plant=PLANT):

@@ -1,0 +1,40 @@
+ARG sort_lub: InArgument(x:String)
+Sequence 'test_bom'
+  vars: bom_task_table:sd3:DataTable
+  NApplicationCard 'change routing bom assign' [AttachMode=ByInstance]
+    Sequence 'Do'
+      vars: row_index:x:Int32=0
+      NExtractDataGeneric 'BOM Table Data in change routing' [TypeArguments=sd2:DataTable8, ExtractMetadata=<extract-table get_columns_name='1' get_empty_columns='1' columns_name_source='Longest' />, ExtractedData=[bom_task_table], LimitExtractionTo=None, MaximumResults=0]
+          @ FullSelectorArgument=<sap id='usr/tblSAPLCMDITCTRL_1000' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Routing Change: Material Component Overview' />
+      ForEachRow 'For Each Row in Data Table' [CurrentIndex=[row_index], DataTable=[bom_task_table]]
+        Sequence 'Body'
+          If [Condition=[String.IsNullOrWhiteSpace(CurrentRow("Component").ToString)]]
+            Then:
+              Sequence 'Then'
+                Break
+            Else:
+              Sequence 'Else'
+                If [Condition=[String.IsNullOrWhiteSpace(CurrentRow("Activity").ToString)]]
+                  Then:
+                    Sequence 'Then'
+                      NClick 'Click 'Checkbox'' [ClickType=Single]
+                          @ FullSelectorArgument=[string.Format("<sap id='usr/tblSAPLCMDITCTRL_1000' tableRow='{0}' />", row_index)] | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Routing Change: Material Component Overview' />
+                      NClick 'Click 'New Assignment'' [ClickType=Single]
+                          @ FullSelectorArgument=<sap id='tbar[1]/btn[5]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Routing Change: Material Component Overview' />
+                      If [Condition=[CurrentRow("Material Description").ToString.ToLower.Contains("carton") OrElse CurrentRow("Material Description").ToString.ToLower.Contains("sheet") OrElse CurrentRow("Material Description").ToString.ToLower.Contains("bag") OrElse CurrentRow("Material Description").ToString.ToLower.Contains("silica") OrElse CurrentRow("Material Description").ToString.ToLower.Contains("bubble") OrElse CurrentRow("Material Description").ToString.ToLower.Contains("box") OrElse (CurrentRow("Material Description").ToString.Trim.ToLower = "lubricant" AndAlso (sort_lub = "YMHI-1" OrElse sort_lub = "YMHI"))]]
+                        Then:
+                          Sequence 'Then'
+                            NTypeInto 'Type Into 'TextField Activity'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=0030]
+                                @ FullSelectorArgument=<sap id='usr/txt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='New Assignment' idx='*' />
+                        Else:
+                          Sequence 'Else'
+                            NTypeInto 'Type Into 'TextField Activity'' [ClickBeforeMode=Single, ClipboardMode=Never, Text=0020]
+                                @ FullSelectorArgument=<sap id='usr/txt[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='New Assignment' idx='*' />
+                      NClick 'Click 'Button Continue (Enter)'' [ClickType=Single]
+                          @ FullSelectorArgument=<sap id='tbar[0]/btn[0]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='#32770' title='New Assignment' idx='*' />
+                  Else:
+                    Sequence 'Else'
+      NClick 'Click 'Button Save (Ctrl+S)'' [ClickType=Single]
+          @ FullSelectorArgument=<sap id='tbar[0]/btn[11]' /> | ScopeSelectorArgument=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' title='Routing Change: Material Component Overview' />
+      @ Selector=<wnd app='saplogon.exe' cls='SAP_FRONTEND_SESSION' />
+      @ app=C:\Program Files\SAP\FrontEnd\SAPGUI\saplogon.exe

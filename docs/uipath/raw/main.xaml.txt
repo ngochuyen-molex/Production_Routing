@@ -1,0 +1,5 @@
+ARG action_input: InArgument(x:String)
+ARG bom_alt_input: InArgument(x:String)
+ARG filepath_input: InArgument(x:String)
+Sequence
+  vars: WSSessionData:x:Object, CurrentRow:ue:CurrentRowQuickHandle, Excel:ue:IWorkbookQuickHandle, ExcelProcessScopeTag:ui:IExcelProcess, CurrentIndex:x:Int32=0
