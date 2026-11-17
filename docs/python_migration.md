@@ -10,6 +10,7 @@ Next steps, in order:
    `tools/uipath_catalog.py`.
 2. **Planning session: design the architecture** on top of that map (open design questions in section 7;
    `docs/uipath_flows.md` section 9 maps UiPath pieces to existing / new Python).
+   Draft for review: [`architecture.md`](architecture.md).
 3. Only after the user agrees with the design: implementation, one branch at a time.
 
 The user wants clean, extensible code and to review a plan (with a readable HTML view, like
@@ -128,6 +129,9 @@ Seen in the project tree (screenshot, 2026-11-16):
 | Migration order | production version step first (reuse `pv-exist` + `SAP_automation` MM02 code), then a single `routing create` / `routing delete` pipeline, then routing + component entry off UiPath |
 | Delete in SAP | set inactive / status as UiPath does: CA02 Header (F5) -> tick deletion flag `usr/sub/6/chk` -> status `1` -> Save (`change_routing/inactive_routing.xaml`, see `docs/uipath_flows.md` 7.1) |
 | ALL BOM | not automated yet: a routing may already have some alt BOM versions (avoid duplicates); see `docs/production_version.md` |
+| Copy source (CA01 "Copy from") | always a routing of the **same material** (same group). Chosen before SAP is touched, from Snowflake (status 4, not TRIAL / MDTRIAL, YMHI when the row has sorting), shown in the Plan sheet (`COPY_FROM_GROUP`, `COPY_FROM_GC`, `COPY_FROM_DESCRIPTION`), can be overridden per row; the CA01 step selects exactly that group + counter instead of "first match" |
+| Routing status (`PLKO-STATU`) | create: **4** = production / released (the UiPath activity label "status 1" is outdated); inactive / delete: deletion flag + **1** = inactive |
+| Snowflake lag (~15 min) | fine: decisions about existing data come from Snowflake; values created in the same run (new group / group counter for PV, TPM, workflow) are read from the SAP screen |
 
 ## 6. SAP facts learned (plant 1901, Snowflake `MLX_DATALAKE.MLX_SAP_ECC`)
 

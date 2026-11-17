@@ -9,6 +9,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 PLANT = os.getenv("ROUTING_PLANT", "1901")
 SNOWFLAKE_CONNECTION = os.getenv("SNOWFLAKE_CONNECTION", "default")
+SAP_CONNECTION_NAME = os.getenv("SAP_CONNECTION_NAME", "M04 [SSO]")     # entry name in SAP Logon
 
 OUTPUT_DIR = Path(os.getenv("ROUTING_OUTPUT_DIR", PROJECT_ROOT / "output"))
 

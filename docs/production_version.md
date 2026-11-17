@@ -34,6 +34,11 @@ rows it lists every version already on the routing, so partly existing routings 
 
 ## Open concern: ALL BOM (logged 2026-11-16)
 
+**Update 2026-11-17:** handled in the automation (`routing run`, pv phase): ALL BOM creates a
+version only for the active alt BOMs that have none yet on the routing (real alt BOM numbers from
+`MAST` / `STKO`), see `docs/architecture.md` section 0. `pv-exist` (the check) still lists ALL BOM
+rows without checking them.
+
 A request with `Alt Bom = ALL BOM` normally means the routing has **no** production version yet,
 so creating one version per alternative BOM (count 3 -> B1, B2, B3) is fine.
 

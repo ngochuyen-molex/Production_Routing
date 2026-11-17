@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+sap = ["pywin32"]       # SAP GUI scripting (routing run without --dry-run)
 
 [project.scripts]
 routing = "routing.cli:main"

@@ -2,7 +2,7 @@
 
 This module holds every routing-related query, one SQL constant + function per
 query (materials_at_plant, routings_with_resource, deleted_status_0020,
-work_centers_0020, group_counters). They share the same MAPL->PLKO->PLAS->PLPO
+work_centers_0020, group_counters, routing_operations). They share the same MAPL->PLKO->PLAS->PLPO
 join chain because that is the correct SAP path to a routing, but each selects
 different columns/filters and is called from exactly one consumer (see the
 "Used by" comment above each function). This is NOT duplication to collapse -
@@ -167,6 +167,44 @@ SQL_GROUP_COUNTERS = """
 """
 
 
+# Used by resolve/routings.py (routing automation: copy source, existing routing, group size)
+SQL_ROUTING_OPERATIONS = """
+    SELECT DISTINCT
+        mp.MATNR,
+        pk.PLNNR AS ROUTING_GROUP,
+        pk.PLNAL AS GROUP_COUNTER,
+        pk.KTEXT AS ROUTING_DESCRIPTION,
+        pk.STATU AS ROUTING_STATUS,
+        pk.DELKZ AS DELETION_FLAG,
+        po.VORNR AS OPERATION_NUMBER,
+        po.STEUS AS CONTROL_KEY,
+        cr.ARBPL AS WORK_CENTER,
+        po.BMSCH AS BASE_QUANTITY
+    FROM MLX_DATALAKE.MLX_SAP_ECC.MAPL mp
+    JOIN MLX_DATALAKE.MLX_SAP_ECC.PLKO pk
+        ON mp.MANDT = pk.MANDT AND mp.PLNTY = pk.PLNTY
+        AND mp.PLNNR = pk.PLNNR AND mp.PLNAL = pk.PLNAL
+    LEFT JOIN MLX_DATALAKE.MLX_SAP_ECC.PLAS ps
+        ON pk.MANDT = ps.MANDT AND pk.PLNTY = ps.PLNTY
+        AND pk.PLNNR = ps.PLNNR AND pk.PLNAL = ps.PLNAL
+        AND ps.LOEKZ = ' ' AND ps.DW_SOFT_DELETE_FLAG = 0
+    LEFT JOIN MLX_DATALAKE.MLX_SAP_ECC.PLPO po
+        ON ps.MANDT = po.MANDT AND ps.PLNTY = po.PLNTY
+        AND ps.PLNNR = po.PLNNR AND ps.PLNKN = po.PLNKN
+        AND po.DW_SOFT_DELETE_FLAG = 0
+    LEFT JOIN MLX_DATALAKE.MLX_SAP_ECC.CRHD cr
+        ON po.ARBID = cr.OBJID AND po.MANDT = cr.MANDT
+    WHERE mp.WERKS = %s
+        AND mp.PLNTY = 'N'
+        AND mp.LOEKZ = ' '
+        AND pk.LOEKZ = ' '
+        AND mp.DW_SOFT_DELETE_FLAG = 0
+        AND pk.DW_SOFT_DELETE_FLAG = 0
+        -- no DELKZ filter: deletion-flagged routings are returned with DELETION_FLAG = 'X'
+        AND mp.MATNR IN ({placeholders})
+"""
+
+
 def _matnrs(materials):
     return [to_sap_matnr(m) for m in materials]
 
@@ -215,3 +253,13 @@ def group_counters(conn, materials, plant=PLANT):
     Used by: opc/add_workflow.py, opc/compare_workflow.py"""
     return query_in_batches(conn, SQL_GROUP_COUNTERS, materials, params_before=[plant],
                             columns=["MATERIAL", "GROUP_COUNTER"])
+
+
+def routing_operations(conn, materials, plant=PLANT):
+    """Every routing still in SAP (active or deletion-flagged) with its operations, one row per
+    operation (operation columns blank for a routing without operations).
+    Used by: resolve/routings.py"""
+    return query_in_batches(
+        conn, SQL_ROUTING_OPERATIONS, _matnrs(materials), params_before=[plant],
+        columns=["MATNR", "ROUTING_GROUP", "GROUP_COUNTER", "ROUTING_DESCRIPTION", "ROUTING_STATUS",
+                 "DELETION_FLAG", "OPERATION_NUMBER", "CONTROL_KEY", "WORK_CENTER", "BASE_QUANTITY"])

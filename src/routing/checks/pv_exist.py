@@ -9,9 +9,9 @@ from routing.core.clean import clean_material_series
 from routing.core.config import PLANT
 from routing.core.db import snowflake_session
 from routing.core.excel import read_input, write_output
-from routing.data import production_version as pv_data
-
-ALL_BOM = "ALL BOM"
+from routing.model.entities import RoutingKey
+from routing.model.requests import AltBomChoice, InputError
+from routing.resolve import routings as routing_resolve
 
 EXISTS = "Exists"
 MISSING = "Missing"
@@ -24,15 +24,18 @@ def _clean(series):
     return series.fillna("").astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
 
 
-def alt_bom_number(alt_bom):
-    """'2' for 2 / '2' / 'B2' / '02', None otherwise (incl. ALL BOM)."""
-    value = str(alt_bom).strip().upper().removeprefix("B").lstrip("0")
-    return value if value.isdigit() else None
+def alt_bom_choice(alt_bom):
+    """AltBomChoice for 2 / '2' / 'B2' / '02' / 'ALL BOM'; None when blank or not readable."""
+    if not str(alt_bom).strip():
+        return None
+    try:
+        return AltBomChoice.parse(alt_bom)
+    except InputError:
+        return None
 
 
 def _describe(versions):
-    return ", ".join(f"{r.PRODUCTION_VERSION} (B{r.ALT_BOM}{', locked' if r.LOCKED else ''})"
-                     for r in versions.sort_values("PRODUCTION_VERSION").itertuples())
+    return ", ".join(v.describe() for v in versions)
 
 
 def check_pv_exists(df, conn=None, plant=PLANT):
@@ -42,28 +45,25 @@ def check_pv_exists(df, conn=None, plant=PLANT):
         df[col] = _clean(df[col]) if col in df.columns else ""
     df["group counter"] = df["group counter"].str.lstrip("0")
 
+    materials = df["Material"].unique().tolist()
     with snowflake_session(conn) as c:
-        pv_df = pv_data.by_routing(c, df["Material"].unique().tolist(), plant)
-    for col in ["MATERIAL", "ROUTING_GROUP", "GROUP_COUNTER", "ALT_BOM"]:
-        pv_df[col] = pv_df[col].fillna("").astype(str).str.strip()
-    pv_df["LOCKED"] = pv_df["LOCK_STATUS"].fillna("").astype(str).str.strip() != ""
+        versions = routing_resolve.load_versions(c, materials, plant)
 
     found_col, check_col = [], []
     for _, row in df.iterrows():
-        on_routing = pv_df[(pv_df["MATERIAL"] == row["Material"]) & (pv_df["ROUTING_GROUP"] == row["group"])
-                           & (pv_df["GROUP_COUNTER"] == row["group counter"])]
-        alt_bom = alt_bom_number(row["Alt Bom"])
+        key = RoutingKey(row["Material"], row["group"], row["group counter"])
+        choice = alt_bom_choice(row["Alt Bom"])
 
         if not row["group"] or not row["group counter"]:
             found, status = "", NO_ROUTING
-        elif row["Alt Bom"].upper() == ALL_BOM:
+        elif choice is not None and choice.all:
             # listed so partly existing ALL BOM routings can be spotted by hand
-            found, status = _describe(on_routing), ALL_BOM_NOT_CHECKED
-        elif alt_bom is None:
+            found, status = _describe(versions[key.material].on(key)), ALL_BOM_NOT_CHECKED
+        elif choice is None:
             found, status = "", INVALID_ALT_BOM
         else:
-            match = on_routing[on_routing["ALT_BOM"] == alt_bom]
-            found, status = _describe(match), EXISTS if len(match) else MISSING
+            match = [v for v in versions[key.material].on(key) if v.alt_bom == choice.number]
+            found, status = _describe(match), EXISTS if match else MISSING
 
         found_col.append(found)
         check_col.append(status)

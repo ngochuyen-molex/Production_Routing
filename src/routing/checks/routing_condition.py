@@ -3,13 +3,12 @@
 Excel columns: Material, Resource, Tool (optional), WorkCenter (optional), Sorting/ Lubricant (optional)
 Adds: group, group counter, SKIP, SKIP_REASON, ROUTING_DESCRIPTION
 """
-import pandas as pd
-
 from routing.core.clean import clean_material_series, from_sap_matnr
 from routing.core.config import PLANT
 from routing.core.db import snowflake_session
 from routing.core.excel import read_input, write_output
 from routing.data import routing as routing_data
+from routing.resolve import routings as routing_resolve
 
 SAFE_TO_ADD = 0
 ROUTING_EXISTS = 1
@@ -40,13 +39,10 @@ def check_routing_exists(df, conn=None, plant=PLANT):
     materials = df["Material"].unique().tolist()
     with snowflake_session(conn) as c:
         plant_df = routing_data.materials_at_plant(c, materials, plant)
-        routing_df = routing_data.routings_with_resource(c, materials, plant)
+        routings = routing_resolve.routings_from_resources(
+            routing_data.routings_with_resource(c, materials, plant), materials)
 
     plant_df["Material"] = plant_df["MATNR"].map(from_sap_matnr)
-    routing_df["Material"] = routing_df["MATNR"].map(from_sap_matnr)
-    routing_df["GROUP_COUNTER"] = routing_df["GROUP_COUNTER"].astype(str).str.lstrip("0")
-    routing_df["DELETION_FLAG"] = routing_df["DELETION_FLAG"].fillna("").astype(str).str.strip()
-
     materials_at_plant = set(plant_df["Material"])
 
     skip_flags = []
@@ -57,7 +53,6 @@ def check_routing_exists(df, conn=None, plant=PLANT):
 
     for _, row in df.iterrows():
         mat = row["Material"]
-        res = row["Resource"]
 
         # Check 1: is the material at the plant?
         if mat not in materials_at_plant:
@@ -69,25 +64,17 @@ def check_routing_exists(df, conn=None, plant=PLANT):
             continue
 
         # Check 2: does a routing with this resource (and tool / wc / sorting in the description) exist?
-        # Deletion-flagged routings (PLKO.DELKZ) count too; an active one is preferred over a flagged one.
-        match = routing_df[(routing_df["Material"] == mat) & (routing_df["RESOURCE"] == res)] if res else pd.DataFrame()
-        if not match.empty:
-            match = match.sort_values("DELETION_FLAG", kind="stable")
-
-        found = None
-        for _, m_row in match.iterrows():
-            desc = str(m_row["ROUTING_DESCRIPTION"])
-            if all(not value or value in desc for value in (row["Tool"], row["WorkCenter"], row["Sorting/ Lubricant"])):
-                found = m_row
-                break
+        # Deletion-flagged routings (PLKO.DELKZ) count too; an active one is preferred (Routing.matches).
+        found = next(iter(routings[mat].matching(row["Resource"], row["Tool"], row["WorkCenter"],
+                                                 row["Sorting/ Lubricant"])), None)
 
         if found is not None:
-            flag = ROUTING_INACTIVE if found["DELETION_FLAG"] == "X" else ROUTING_EXISTS
+            flag = ROUTING_INACTIVE if found.deleted else ROUTING_EXISTS
             skip_flags.append(flag)
             skip_reasons.append(SKIP_REASONS[flag])
-            routing_descriptions.append(str(found["ROUTING_DESCRIPTION"]))
-            routing_groups.append(found["ROUTING_GROUP"])
-            group_counters.append(found["GROUP_COUNTER"])
+            routing_descriptions.append(found.description)
+            routing_groups.append(found.key.group)
+            group_counters.append(found.key.counter)
         else:
             skip_flags.append(SAFE_TO_ADD)
             skip_reasons.append(SKIP_REASONS[SAFE_TO_ADD])

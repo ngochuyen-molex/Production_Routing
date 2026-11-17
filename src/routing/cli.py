@@ -1,6 +1,7 @@
 """Command line entry point.
 
     routing pre-uipath FILE
+    routing run FILE [--dry-run] [--phase routing] [--only create] [--rows 5-12] [--slow]
     routing check routing-condition FILE [-o OUT]
     routing opc add-tpm [-i FILE] [-o OUT]
     routing list
@@ -14,6 +15,7 @@ import sys
 import traceback
 
 from routing.core.excel import ask_path
+from routing.model.enums import PHASES, Action
 
 # command -> (module, function, accepts sheet_name)
 CHECKS = {
@@ -49,6 +51,17 @@ def _load(module, function):
     return getattr(importlib.import_module(module), function)
 
 
+def parse_rows(text):
+    """'5-12' / '5,7,9' / '5-7,10' -> {5, 6, 7, 10}; None for all rows."""
+    if not text:
+        return None
+    rows = set()
+    for part in str(text).split(","):
+        start, _, end = part.strip().partition("-")
+        rows.update(range(int(start), int(end or start) + 1))
+    return rows
+
+
 def run_check(name, file=None, output=None, sheet=None):
     module, function, has_sheet = CHECKS[name]
     kwargs = {}
@@ -73,6 +86,16 @@ def build_parser():
     pre.add_argument("file", nargs="?")
     pre.add_argument("-o", "--output")
 
+    run = sub.add_parser("run", help="plan + run routing requests in SAP (Action column: Create / Delete)")
+    run.add_argument("file", nargs="?")
+    run.add_argument("--phase", action="append", choices=PHASES,
+                     help="only these phases (repeatable); default: all, always in phase order")
+    run.add_argument("--only", choices=[a.value.lower() for a in Action], help="only rows with this Action")
+    run.add_argument("--rows", help="only these Excel rows, e.g. 5-12 or 5,7,9")
+    run.add_argument("--dry-run", action="store_true", help="plan only (Plan sheet), SAP is not touched")
+    run.add_argument("--slow", action="store_true", help="wait after every SAP action (watch / debug)")
+    run.add_argument("--sheet", help="request sheet (default: first sheet)")
+
     check = sub.add_parser("check", help="run one Snowflake / OpCenter check")
     check.add_argument("name", choices=sorted(CHECKS))
     check.add_argument("file", nargs="?")
@@ -94,12 +117,17 @@ def main(argv=None):
         if args.command == "pre-uipath":
             from routing.pipelines.pre_uipath import run
             run(args.file or ask_path(), output_path=args.output)
+        elif args.command == "run":
+            from routing.pipelines.run import run
+            run(args.file or ask_path(), phases=tuple(args.phase or PHASES),
+                only=Action.parse(args.only) if args.only else None, rows=parse_rows(args.rows),
+                dry_run=args.dry_run, slow=args.slow, sheet=args.sheet)
         elif args.command == "check":
             run_check(args.name, args.file, args.output, args.sheet)
         elif args.command == "opc":
             run_opc(args.name, args.input, args.output)
         elif args.command == "list":
-            print("pre-uipath\n" + "\n".join(f"check {n}" for n in sorted(CHECKS))
+            print("pre-uipath\nrun\n" + "\n".join(f"check {n}" for n in sorted(CHECKS))
                   + "\n" + "\n".join(f"opc {n}" for n in sorted(OPC)))
     except Exception:
         traceback.print_exc()

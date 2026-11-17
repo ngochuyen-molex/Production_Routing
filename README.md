@@ -6,6 +6,22 @@ OpCenter upload-file generators (Tool Plan Matrix, workflows).
 Planned: move the SAP data entry from UiPath to Python. Context, decisions and next steps:
 [`docs/python_migration.md`](docs/python_migration.md).
 
+## Routing requests in SAP (in progress)
+
+```powershell
+pip install -e ".[sap]"                          # pywin32 for SAP GUI scripting
+routing run FILE --dry-run                       # plan only: Plan sheet, SAP untouched
+routing run FILE --rows 5 --slow                 # one row, slow, while watching SAP
+routing run FILE [--phase routing] [--only create|delete]
+```
+
+One sheet, one row per request (`Action` = Create / Delete, `Dept`, `Material`, `Resource`, `Tool`,
+`Capacity`, `Tool Cavity`, `Efficiency`, `Utilization`, `Sorting/ Lubricant`, ..., `Alt Bom`).
+Results go to `RESULT_<step>` columns, `group` / `group counter`, a **Plan** and a **Run log** sheet;
+reruns skip finished steps. Built: routing (create in CA01, inactivate in CA02), components (CA02)
+and production versions (MM02); not run against SAP yet, OpCenter phase not built.
+Design and status: [`docs/architecture.md`](docs/architecture.md).
+
 ## Setup (once)
 
 ```powershell
