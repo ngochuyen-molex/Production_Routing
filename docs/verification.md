@@ -25,13 +25,17 @@ Nothing has been run against real SAP yet.
 - [ ] Operation overview row numbers per layout (`architecture.md` 6.6) - first live routing per layout
 - [ ] First live run: one row with `routing run FILE --rows N --slow`
 
-### Business rules (details: C, D, E, F)
-- [x] Copy source: same material, status 4, not flagged, not TRIAL / MDTRIAL (2026-11-17)
+### Business rules (details: C, D, E, F, H)
+- [x] Copy source: same material, status 4, not flagged; normal resource -> never a TRIAL / MDTRIAL
+      routing, trial resource -> only a trial routing (2026-11-17, trial resource rule 2026-11-18)
 - [x] Copy source has the same sorting shape as the request - YMHI step from the **operations**,
       not the name - also for the COPY_FROM override (2026-11-18)
 - [x] Blank optional values (no tool, no sorting / lubricant) never break a name or stop the run (2026-11-18)
 - [x] Final step = PP94 only; ZP04 = trial routing (2026-11-18)
 - [x] Delete / Assign Components never guess between several matching routings (2026-11-17/18)
+- [x] Which routing a row means: group + group counter given -> exactly that one; else found in
+      Snowflake by resource + tool + sorting, exactly one or skip; trial routings only for a trial
+      resource; Add writes the new group / counter back; see H (2026-11-18)
 - [x] ALL BOM creates only the missing production versions (real active alt BOM numbers) (2026-11-17)
 - [x] BOM allocation follows `SAP_automation` (same screens, two passes 0030 / 0020); a number =
       that alt BOM only, ALL BOM = every active alt BOM; see F (2026-11-18)
@@ -96,7 +100,7 @@ A wrong source puts values on the wrong operation rows. Code: `MaterialRoutings.
 | Rule | Check | If no routing passes |
 |---|---|---|
 | Same material | routings of the row's material only (other materials: backlog) | skip |
-| Usable | status 4, deletion flag not set, name without `TRIAL` / `MDTRIAL` | skip |
+| Usable | status 4, deletion flag not set; **normal resource -> normal routing only, trial resource (`MDTRIAL`, `PLTTRIAL`, `ASTRIAL`, `ASMTRIAL`, `STPTRIAL`) -> trial routing only** (H) | skip |
 | **Same sorting shape** | request has `Sorting/ Lubricant` -> source **must have** a YMHI sorting step; request without -> source **must not** have one | skip: `no routing of this material to copy from with a YMHI sorting step` |
 | Preference | 1. fits the layout, 2. same resource, 3. same sorting work center, 4. newest group counter | - |
 | Override `COPY_FROM_GROUP` / `_GC` | must be usable **and** have the same sorting shape | skip: `COPY_FROM M0527609/15 must be a routing with a YMHI sorting step` |
@@ -228,3 +232,59 @@ CA01 / CA02 / MM02 and after the CA01 header (status 4), a warning (W) in the st
 more Enter, at most 2 (`SapSession.pass_warnings`); an error (E) stops the step; a material-status
 message skips the row. The MM02 "select views" and "organizational levels" popups each get their
 own Enter (`mm02.open_versions`). Test: `test_initial_screen_warning_gets_extra_enter`.
+
+## H. Which routing a row means (Delete, Assign Components, "already exists" on Add)
+
+Code: `steps/routing.py` `matching_routings` / `single_routing`, rule in `model/entities.py`
+(`Routing.matches`, `MaterialRoutings.matching`), data from `data/routing.routing_operations`
+(one Snowflake query for all materials of the file, read while planning, before SAP is touched).
+`checks/routing_condition.py` uses the same matching rule (see the trial exception below).
+
+**1. `group` and `group counter` both filled -> exactly that routing.** The routing with this
+material + group + group counter is taken from the Snowflake list; resource / tool are not used.
+Group + group counter identify one routing in SAP, so there is never more than one. Not in
+Snowflake -> `Skipped: routing not found`; nothing else is chosen instead. In CA02 the same group
+is picked in the group popup and the same counter in the header list (never by position).
+
+**2. Blank -> found in Snowflake** by the routing-condition rule: `Resource` is a work center of
+one of the routing's operations, `Tool` and `Sorting/ Lubricant` (when filled) are in its name.
+
+| Matches (active routings) | Result |
+|---|---|
+| exactly 1 | that routing; its group / group counter are written into the row |
+| 2 or more | `Skipped: 2 routings match (M0527609/13, M0527609/15), fill group / group counter` - never a guess (common for plating: no tool) |
+| none, only a deletion-flagged one | `Skipped: already inactive G/C` |
+| none | `Skipped: routing not found` |
+
+Check before a real run: `routing run FILE --dry-run` -> Plan sheet, column **Target routing**
+shows the exact group / counter per row (or the skip reason). Type group / group counter into a
+row to fix the choice.
+
+**3. Trial routings (decided 2026-11-18).** A trial routing = `TRIAL` in the name or a trial work
+center (`MDTRIAL`, `PLTTRIAL`, `ASTRIAL`, `ASMTRIAL`, `STPTRIAL`) in its operations (546 active
+status-4 trial routings at plant 1901, 2026-11-18).
+
+| Request `Resource` | Matching / "already exists" / Delete | Copy source on Add |
+|---|---|---|
+| normal machine (e.g. `MF15-17`) | normal routings only - a TRIAL routing is never deleted or counted | normal routing only |
+| trial work center (e.g. `MDTRIAL`) | trial routings only | trial routing only (status 4, not flagged), never a normal one |
+
+`routing check routing-condition` keeps counting trial routings as existing (it reports what is in
+SAP); only the routing automation separates them. Production versions are not created for trial
+routings (unchanged). Tests: `test_trial_resource_only_finds_and_copies_trial_routings`,
+`test_delete_never_picks_a_trial_routing_for_a_normal_resource`.
+
+**4. Production versions of a Delete row** = the versions in Snowflake (MKAL) whose group + group
+counter are the chosen routing's, deleted by version number. Versions of other routings are never
+touched. None -> `Skipped: no production version on G/C`.
+
+**5. Add -> later Delete of the same test routings** (e.g. `add_routing_test.xlsx`):
+1. The Add run reads the **new** group / group counter from the CA01 header screen (not from
+   Snowflake) and writes them into the row's `group` / `group counter`.
+2. For the Delete run: change `Action` to `Delete` in the same rows (group / counter stay), and
+   **clear `RESULT_ROUTING` and `RESULT_MM02`** - Add and Delete share these columns, a `Done` from
+   the Add run would make the Delete steps count as already done.
+3. Wait ~15 minutes after the Add run: Delete looks the routing and its versions up in Snowflake,
+   which lags SAP. Too early -> `Skipped: routing not found` / `no production version` (safe, run
+   again later).
+4. Delete = deletion flag + status 1 (not a hard delete; the flag can be unticked).

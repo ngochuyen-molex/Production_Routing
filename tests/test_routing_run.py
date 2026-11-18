@@ -83,14 +83,54 @@ def test_copy_source_check_and_ranking():
 
 
 def test_matching_uses_routing_condition_rule():
-    # resource = work center of an operation, tool in the description; TRIAL counts for existence
+    # resource = work center of an operation, tool in the description; a trial routing only counts
+    # for a trial resource (routing automation); routing_condition (trial_rule=False) still counts it
     flagged = routing("14", "MN15-14 - L505276B", MOLD_LUBE, deleted=True)
     active = routing("13", "MN15-14-5052760989-L505276B-YMHI-1", MOLD_LUBE)
     trial = routing("12", "MN15-14 L505276B TRIAL", MOLD_LUBE)
     only_text = routing("18", "MN15-14 - L505276B", MOLD)            # MN15-14 only in the text, not a work center
     routings = MaterialRoutings(MAT, (flagged, trial, active, only_text))
-    assert [r.key.counter for r in routings.matching("MN15-14", "L505276B")] == ["13", "12", "14"]
+    assert [r.key.counter for r in routings.matching("MN15-14", "L505276B")] == ["13", "14"]
+    assert [r.key.counter for r in routings.matching("MN15-14", "L505276B", trial_rule=False)] == ["13", "12", "14"]
     assert routings.matching("MN15-14", "L505276X") == []
+
+
+MDTRIAL_OPS = [("0005", "PP07", "TMC"), ("0010", "PPQM", "XQA"), ("0020", "PP01", "MDTRIAL"),
+               ("0030", "PP94", "OMINS")]
+
+
+def test_trial_resource_only_finds_and_copies_trial_routings():
+    normal = routing("15", "MF15-17 - 5052760989 - L505276A", MOLD)
+    trial = routing("20", "MDTRIAL-MF15-17 - 5052760989 - L505276A", MDTRIAL_OPS)
+    ctx = FakeContext({MAT: [normal, trial]})
+    assert trial.is_trial and not normal.is_trial
+
+    # Add with a normal resource: copies the normal routing, never the trial one
+    assert plan_steps(create_row(Resource="MF15-20", Tool="L505276A"), ctx).plan.copy_from.key.counter == "15"
+    # Add with MDTRIAL: the trial routing already exists for this tool -> skipped as existing
+    exists = plan_steps(create_row(Resource="MDTRIAL", Tool="L505276A"), ctx)
+    assert exists.plan.skip["CreateRouting"] == "routing already exists M0527609/20"
+    # Add with MDTRIAL and another tool: copies the trial routing, not the normal one
+    new_trial = plan_steps(create_row(Resource="MDTRIAL", Tool="L505276Z"), ctx)
+    assert new_trial.plan.copy_from.key.counter == "20"
+    # COPY_FROM a normal routing for a trial resource (and the reverse) is refused
+    wrong = plan_steps(create_row(Resource="MDTRIAL", Tool="L505276Z", COPY_FROM_GROUP="M0527609", COPY_FROM_GC="15"), ctx)
+    assert wrong.plan.skip["CreateRouting"] == "COPY_FROM M0527609/15 must be a trial routing, status 4, not flagged"
+    # no trial routing of the material at all -> skipped, never falls back to a normal one
+    none = plan_steps(create_row(Resource="MDTRIAL", Tool="L505276Z"), FakeContext({MAT: [normal]}))
+    assert none.plan.skip["CreateRouting"].startswith("no trial routing of this material to copy from")
+
+
+def test_delete_never_picks_a_trial_routing_for_a_normal_resource():
+    normal = routing("15", "MF15-17 - L505276A", MOLD)
+    trial = routing("20", "MF15-17 - L505276A TRIAL", MOLD)          # same machine, TRIAL in the name
+    ctx = FakeContext({MAT: [normal, trial]})
+    delete = {"Action": "Delete", "Dept": "MD", "Material": MAT, "Resource": "MF15-17", "Tool": "L505276A"}
+    assert str(plan_steps(delete, ctx).key) == "M0527609/15"         # not ambiguous: trial not counted
+    only_trial = plan_steps(delete, FakeContext({MAT: [trial]}))
+    assert only_trial.plan.skip["InactivateRouting"] == "routing not found"
+    by_key = plan_steps(dict(delete, group="M0527609", **{"group counter": "20"}), ctx)
+    assert str(by_key.key) == "M0527609/20"                          # group + counter given: exactly that one
 
 
 def test_operation_roles_and_versions():

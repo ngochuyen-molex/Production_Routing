@@ -65,8 +65,9 @@ def check_routing_exists(df, conn=None, plant=PLANT):
 
         # Check 2: does a routing with this resource (and tool / wc / sorting in the description) exist?
         # Deletion-flagged routings (PLKO.DELKZ) count too; an active one is preferred (Routing.matches).
+        # Trial routings count as existing here (trial_rule=False); the routing automation separates them.
         found = next(iter(routings[mat].matching(row["Resource"], row["Tool"], row["WorkCenter"],
-                                                 row["Sorting/ Lubricant"])), None)
+                                                 row["Sorting/ Lubricant"], trial_rule=False)), None)
 
         if found is not None:
             flag = ROUTING_INACTIVE if found.deleted else ROUTING_EXISTS

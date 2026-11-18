@@ -1,7 +1,7 @@
 """Routing phase: create (CA01) and inactivate (CA02) routings."""
 from routing.layouts import select as layouts
 from routing.layouts.catalog import MACHINE_NAME
-from routing.model.entities import Routing, RoutingKey
+from routing.model.entities import Routing, RoutingKey, is_trial_resource
 from routing.model.enums import Action
 from routing.model.result import StepResult
 from routing.sap.screens import ca01, ca02, operations
@@ -67,11 +67,13 @@ class CreateRouting(Step):
 
         needs_sorting = bool(request.params.sorting)
         shape = "with a YMHI sorting step" if needs_sorting else "without a YMHI sorting step"
+        kind = "trial routing" if is_trial_resource(request.resource) else "normal (not TRIAL) routing"
         if request.copy_from:                            # the user's choice in COPY_FROM_GROUP / _GC
             source = routings.get(request.copy_from)
-            if source is None or not source.can_be_copied:
+            if source is None or not source.can_be_copied_for(request.resource):
                 plan.skip[self.name] = (f"COPY_FROM {request.copy_from} "
-                                        + ("not found" if source is None else "is not status 4 / is flagged / is TRIAL"))
+                                        + ("not found" if source is None
+                                           else f"must be a {kind}, status 4, not flagged"))
                 return
             if source.has_sorting != needs_sorting:      # rows would shift: never copy the wrong shape
                 plan.skip[self.name] = f"COPY_FROM {request.copy_from} must be a routing {shape}"
@@ -81,8 +83,8 @@ class CreateRouting(Step):
                                           resource=request.resource, needs_sorting=needs_sorting,
                                           sorting=request.params.sorting)
             if source is None:
-                plan.skip[self.name] = (f"no routing of this material to copy from {shape} "
-                                        "(status 4, not flagged, not TRIAL)")
+                plan.skip[self.name] = (f"no {kind} of this material to copy from {shape} "
+                                        "(status 4, not flagged)")
                 return
         plan.copy_from = source
         if ("YMHI" in source.description.upper()) != source.has_sorting:

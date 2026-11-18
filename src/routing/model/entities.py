@@ -14,6 +14,12 @@ SORTING_PREFIX = "YMHI"
 FINAL_CONTROL_KEYS = ("PP94",)  # ZP04 = trial routing, never a final step
 VERSION_LIMIT = 5000            # versions >= 5000 are not counted for the next number (UiPath add_production_detail)
 VERSION_TEXT_LIMIT = 40         # MKAL-TEXT1
+TRIAL_MARK = "TRIAL"            # trial work centers: MDTRIAL, PLTTRIAL, ASTRIAL, ASMTRIAL, STPTRIAL
+
+
+def is_trial_resource(resource):
+    """A trial work center (MDTRIAL, PLTTRIAL, ...) rather than a production machine."""
+    return TRIAL_MARK in str(resource or "").upper()
 
 
 @dataclass(frozen=True)
@@ -48,7 +54,9 @@ class Routing:
 
     @property
     def is_trial(self):
-        return "TRIAL" in self.description.upper()         # covers MDTRIAL
+        """Trial routing: TRIAL in the name (covers MDTRIAL) or a trial work center (MDTRIAL,
+        PLTTRIAL, ASTRIAL, ASMTRIAL, STPTRIAL at 0020)."""
+        return "TRIAL" in self.description.upper() or any(is_trial_resource(wc) for wc in self.work_centers())
 
     @property
     def has_sorting(self):
@@ -62,8 +70,14 @@ class Routing:
 
     @property
     def can_be_copied(self):
-        """Valid copy source for CA01: production status, not flagged, never a trial routing."""
-        return self.status == PRODUCTION_STATUS and not self.deleted and not self.is_trial
+        """Valid copy source for CA01 for a normal resource: status 4, not flagged, not a trial routing."""
+        return self.can_be_copied_for("")
+
+    def can_be_copied_for(self, resource):
+        """Valid copy source for a request with `resource`: status 4, not flagged, and a trial
+        routing exactly when the resource is a trial work center (MDTRIAL -> copy a trial routing)."""
+        return (self.status == PRODUCTION_STATUS and not self.deleted
+                and self.is_trial == is_trial_resource(resource))
 
     def work_centers(self):
         return [op.work_center for op in self.operations]
@@ -99,9 +113,13 @@ class MaterialRoutings:
     def get(self, key):
         return next((r for r in self.routings if r.key == key), None)
 
-    def matching(self, resource, *texts):
-        """Routings the row can mean, best first: active before flagged, then newest counter."""
-        found = [r for r in self.routings if r.matches(resource, *texts)]
+    def matching(self, resource, *texts, trial_rule=True):
+        """Routings the row can mean, best first: active before flagged, then newest counter.
+        trial_rule (routing automation): a normal resource only matches normal routings, a trial
+        resource (MDTRIAL, ...) only trial ones. checks/routing_condition passes False: there a
+        trial routing still counts as existing."""
+        found = [r for r in self.routings if r.matches(resource, *texts)
+                 and (not trial_rule or r.is_trial == is_trial_resource(resource))]
         return sorted(found, key=lambda r: (r.deleted, -_number(r.key.counter)))
 
     def group_size(self, group):
@@ -109,11 +127,12 @@ class MaterialRoutings:
 
     def copy_source(self, fits, resource="", needs_sorting=False, sorting=""):
         """Best routing to copy in CA01, or None.
-        Must: can_be_copied (status 4, not flagged, not TRIAL) and the same sorting shape as the
-        request - a sorting step (YMHI work center after 0020, from the operations, not the name)
-        exactly when the request has a Sorting/ Lubricant; otherwise the rows shift.
+        Must: can_be_copied_for(resource) (status 4, not flagged; trial routing only for a trial
+        resource) and the same sorting shape as the request - a sorting step (YMHI work center after
+        0020, from the operations, not the name) exactly when the request has a Sorting/ Lubricant;
+        otherwise the rows shift.
         Ranked by: fits(routing) (no layout warnings), same resource, same sorting work center, newest."""
-        candidates = [r for r in self.routings if r.can_be_copied and r.has_sorting == needs_sorting]
+        candidates = [r for r in self.routings if r.can_be_copied_for(resource) and r.has_sorting == needs_sorting]
         candidates.sort(key=lambda r: (not fits(r), resource not in r.work_centers(),
                                        bool(sorting) and r.sorting_work_center() != sorting,
                                        -_number(r.key.counter)))
