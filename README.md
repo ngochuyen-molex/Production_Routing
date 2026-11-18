@@ -3,8 +3,8 @@
 SAP routing checks (Snowflake) that run before the UiPath routing automation, and
 OpCenter upload-file generators (Tool Plan Matrix, workflows).
 
-Planned: move the SAP data entry from UiPath to Python. Context, decisions and next steps:
-[`docs/python_migration.md`](docs/python_migration.md).
+In progress: the SAP data entry moves from UiPath to Python (`routing run`, below). Background,
+decisions and SAP facts: [Background: replacing UiPath](#background-replacing-uipath).
 
 ## Routing requests in SAP (in progress)
 
@@ -12,15 +12,19 @@ Planned: move the SAP data entry from UiPath to Python. Context, decisions and n
 pip install -e ".[sap]"                          # pywin32 for SAP GUI scripting
 routing run FILE --dry-run                       # plan only: Plan sheet, SAP untouched
 routing run FILE --rows 5 --slow                 # one row, slow, while watching SAP
-routing run FILE [--phase routing] [--only create|delete]
+routing run FILE [--phase routing] [--only add|delete|"assign components"]
 ```
 
-One sheet, one row per request (`Action` = Create / Delete, `Dept`, `Material`, `Resource`, `Tool`,
-`Capacity`, `Tool Cavity`, `Efficiency`, `Utilization`, `Sorting/ Lubricant`, ..., `Alt Bom`).
-Results go to `RESULT_<step>` columns, `group` / `group counter`, a **Plan** and a **Run log** sheet;
-reruns skip finished steps. Built: routing (create in CA01, inactivate in CA02), components (CA02)
+One sheet, one row per request (`Action` = Add / Delete / Assign Components; `Create` is also accepted; `Dept`, `Material`,
+`Resource`, `Tool`, `Capacity`, `Tool Cavity`, `Efficiency`, `Utilization`, `Sorting/ Lubricant`, ...,
+`Alt Bom`). `Same Info` and Change Resource are backlog (docs/architecture.md section 9).
+Results go to `RESULT_ROUTING` (CA01 / CA02), `RESULT_COMPALLOC` (component allocation) and
+`RESULT_MM02` (production versions) - `Done: ...` / `Skipped: ...` / `Failed: ...` - plus `group` /
+`group counter`, a **Plan** and a **Run log** sheet; reruns skip Done / Skipped steps and retry
+Failed ones. The old UiPath `progress` column is not read. Built: routing (create in CA01, inactivate in CA02), components (CA02)
 and production versions (MM02); not run against SAP yet, OpCenter phase not built.
-Design and status: [`docs/architecture.md`](docs/architecture.md).
+Design and status: [`docs/architecture.md`](docs/architecture.md); what is checked / still open:
+[`docs/verification.md`](docs/verification.md).
 
 ## Setup (once)
 
@@ -111,3 +115,55 @@ or `.env` (`ROUTING_PLANT`, `SNOWFLAKE_CONNECTION`, `ROUTING_OUTPUT_DIR`).
 ```powershell
 pytest
 ```
+
+## Background: replacing UiPath
+
+**Goal**: one Python tool runs the whole routing lifecycle (SAP + OpCenter files), so UiPath is no
+longer needed. UiPath keeps running until each Python branch is proven on SAP.
+
+| Lifecycle | Steps (phases of `routing run`) |
+|---|---|
+| Create | CA01 copy a routing of the same material -> component allocation (CA02, all or one alt BOM) -> production versions (MM02) -> OpCenter TPM + workflow files |
+| Delete | CA02 deletion flag + status 1 -> delete the production versions (MM02) -> OpCenter delete TPM / workflow |
+| Assign Components | component allocation (CA02) on an existing routing |
+| Later | change capacity, change work center, rename routings / versions (design in `docs/architecture.md`) |
+
+**Docs**
+
+| File | What |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | design, status, scope, backlog |
+| [`docs/verification.md`](docs/verification.md) | what is checked / still open (the only checklist) |
+| [`docs/uipath_flows.md`](docs/uipath_flows.md) | how the UiPath project works (being replaced) |
+| `docs/uipath/ui_elements.md`, `.csv` | SAP element ids taken from UiPath (regenerate: `tools/uipath_dump.py`, `tools/uipath_catalog.py`) |
+
+**Related folders** (read-only, never changed from here)
+
+| Folder | What |
+|---|---|
+| `C:\Users\nguyeb3\OneDrive - kochind.com\Documents\UiPath\add routing` | the UiPath project. `main.xaml` is empty, each workflow is run on its own; all SAP actions use element ids (UiPath `usr/sub?N/...` = scripting `wnd[0]/usr/sub/N/...`); no OpCenter steps |
+| `C:\Users\nguyeb3\Downloads\SAP_automation\change_bom` | Python SAP GUI scripting: `production_version.py` (MM02), `routing.py` / `routing_main.py` (CA02 component allocation), `bom.py` / `bom_create.py` (CS02 / CS01). Code reused here is **copied**, see `docs/architecture.md` 5.4 |
+
+**Decisions**
+
+| Topic | Decision |
+|---|---|
+| SAP access | SAP GUI scripting from Python (as `SAP_automation`), not RFC / BAPI; SAP Logon connection `M04 [SSO]` |
+| Input | one Excel file, one row per request, `Action` column; deletes run before creates |
+| Copy source | a routing of the **same material**, chosen before the run from Snowflake (rules: `docs/verification.md` C), overridable per row |
+| Routing status | create: **4** = production / released (UiPath's label "status 1" is outdated); delete: deletion flag + **1** = inactive |
+| Snowflake lag (~15 min) | existing data comes from Snowflake; anything created in the same run (new group / counter) is read from the SAP screen |
+
+**SAP facts** (plant 1901, Snowflake `MLX_DATALAKE.MLX_SAP_ECC`)
+- Delete fields: `PLKO.DELKZ = 'X'` = deletion flag, still in SAP and reactivatable;
+  `DW_SOFT_DELETE_FLAG = 1` = gone from SAP (history only); `MAPL.LOEKZ` / `PLKO.LOEKZ = 'X'` =
+  deleted. Example: 522690630 GC 15 flagged, still in SAP; GC 16 permanently deleted.
+- Operation roles: production = 0020 (`PP01`, a few at 0030); sorting / lubricant = work center
+  `YMHI*` after 0020 (`PP96`); final step = `PP94` only (last, 0030-0060); `ZP04` = trial routing.
+  YMHI at 0020 is production (hi-coat, regrinding). Details: `docs/operation_values.md`.
+- Standard values (`PLPO`): setup / machine / labor = `VGW01-03`, units `VGE01-03`, activity types
+  `LAR01-03`; unit conversion `UMREZ` / `UMREN`.
+- Production versions (`MKAL`): `VERID`, routing `PLNNR` + `ALNAL`, alt BOM `STLAL`, lock `MKSP`,
+  valid `ADATU`-`BDATU`, text like `MF50-09 - L501330A B1`.
+- Active alt BOM = `MAST.STLAN = 1` + `STKO.STLST = 01`, not soft-deleted. A **count** is not the
+  numbers: active alt BOMs 1 and 3 give count 2.

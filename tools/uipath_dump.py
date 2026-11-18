@@ -1,6 +1,6 @@
 """Dump UiPath XAML workflows to readable pseudo-code + a UI element table.
 
-Read-only helper for the UiPath -> Python migration (docs/python_migration.md).
+Read-only helper for the UiPath -> Python migration (README.md Background).
 Usage: python tools/uipath_dump.py "<uipath project dir>" docs/uipath/raw
 Writes one <name>.txt (activity tree) per XAML and ui_elements_raw.csv.
 """

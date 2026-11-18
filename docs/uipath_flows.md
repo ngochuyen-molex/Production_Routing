@@ -5,7 +5,7 @@ nothing changed there). UI elements (part 1): [`uipath/ui_elements.md`](uipath/u
 catalogue `uipath/ui_elements.csv`. Full pseudo-code per file: `uipath/raw/*.txt`.
 
 Purpose of this file: what each workflow does, how workflows call each other (arguments in / out),
-the conditions and loops, and what that means for the Python design (`python_migration.md` section 7).
+the conditions and loops, and what that means for the Python design (`docs/architecture.md`).
 
 ---
 
@@ -36,40 +36,112 @@ the conditions and loops, and what that means for the Python design (`python_mig
 Not part of the current flow (kept for reference / future features): `change_routing/delete_routing`,
 `change_routing/delete_product_version`, `production_version/delete_all_pd`, `delete_pd_textdesc`,
 `change_resource`, and the root `change_capacity*`, `change_wc_sap` (future "change" features in
-`python_migration.md` section 1).
+`docs/architecture.md` section 9).
 
 ---
 
 ## 2. Call graph
 
+Read it like Python: a workflow = a function, **In** arguments = parameters, **Out** arguments =
+return values. `[run]` = the file you start yourself; indented boxes are the files it calls, in order.
+
+### 2.1 Create routing (CA01) - one department file per run
+
 ```
-(run directly)                                 invokes                                    arguments (name(direction) = value)
--------------------------------------------    -----------------------------------------  -----------------------------------------------
-add_routing/create_routing_mold.xaml   CA01 -> add_routing/nested_find_copy_routing    material(In)=Material, resource(In)=Resource, in_sort_lub(In)=sort_lubricant
-                                          \                 -> add_routing/find_valid_routing_tocopy  material(In)=material, in_sorting_lubricant(In)=in_sort_lub
-                                           -> bom_assign/assign_bom_activity          (no arguments -> sort_lub = Nothing)
-add_routing/create_routing_stamping.xaml    same as mold, in_sort_lub = Nothing
-add_routing/create_routing_as.xaml          nested_find_copy_routing (material, resource), assign_bom_activity (none)
-add_routing/create_routing_plt.xaml         nested_find_copy_routing (in_sort_lub = Nothing); no component allocation
-add_routing/create_routing_sameinfo.xaml    nested_find_copy_routing (material, resource); own inline allocation
+[run] add_routing/create_routing_<dept>.xaml          (as / plt / stamping / mold / sameinfo)
+  |   loop: for each Excel row
+  |
+  |-- 1. nested_find_copy_routing(material, resource, in_sort_lub)        pick the routing to copy
+  |       |   if popup "Entry Option: Group":  click first Status 4, not TRIAL
+  |       |
+  |       '-- find_valid_routing_tocopy(material, in_sorting_lubricant)
+  |               if popup "Select Type": copy-from dialog -> click first Status 4,
+  |               not TRIAL / MDTRIAL, contains YMHI when sorting is given
+  |
+  |-- 2. (inline) header, description, status, operation rows per department (section 4)
+  |
+  '-- 3. assign_bom_activity()                                           not in plt
+          assign each unassigned component to 0030 / 0020, Save
+```
 
-bom_assign/main_bom_assignment.xaml    CA02 -> bom_assign/choose_routing_allocate_bom  tool(In), resource(In), in_sort_lub(In), row_index(Out)
-                                           -> bom_assign/assign_bom_activity          sort_lub(In)=sort_lubricant
+### 2.2 Assign components of a specific routing (CA02)
 
-production_version/production_version_main.xaml  MM02, Switch on "Action":
-                                           "Add"    -> production_version/add_pd      group, group_counter, resource, tool, material, alt_bom_ver, alt_bom_count, in_sort_lub
-                                                         -> add_production_detail      bom_alt, group, group_counter, tool, resource, sorting   (1x or ALT_BOM_COUNT x)
-                                           "CHANGE" -> production_version/change_resource   resource_before, resource_after, tool
-                                           "DELETE" -> production_version/delete_production_version   num_alt_bom, resource, tool, in_sort_lub
-                                                       (delete_pd_textdesc is commented out)
-production_version/delete_all_pd.xaml  MM02  (no invokes)
-change_routing/delete_product_version.xaml  MM02 (no invokes)
+```
+[run] bom_assign/main_bom_assignment.xaml
+  |   loop: for each Excel row where ALT_BOM_COUNT = 2
+  |
+  |-- 1. choose_routing_allocate_bom(tool, resource, in_sort_lub) -> row_index
+  |         row_index = -1  ->  Save, write "not found routing", next row
+  |
+  '-- 2. assign_bom_activity(sort_lub)          after choosing alt BOM 2 in the popup
+```
 
-change_routing/inactive_routing.xaml   CA02 -> bom_assign/choose_routing_allocate_bom  tool, resource, row_index(Out)   (in_sort_lub not passed)
-change_routing/delete_routing.xaml     CA02 -> bom_assign/choose_routing_allocate_bom  tool, resource, row_index(Out)
-change_capacity.xaml                   CA02 -> change_routing/choose_routing          tool, resource, row_index(Out)
-change_capacity_molding.xaml           CA02 -> change_routing/choose_routing          tool, resource, row_index(Out)
-change_wc_sap.xaml                     CA02 -> delete_routing/choose_routing  (!!)    tool, resource=Resource before, row_index(Out)
+### 2.3 Delete routing (CA02)
+
+```
+[run] change_routing/inactive_routing.xaml
+  |   loop: for each Excel row
+  |
+  '-- choose_routing_allocate_bom(tool, resource) -> row_index      (in_sort_lub not passed!)
+          row_index <> -1  ->  Header -> tick Deletion flag -> status 1 -> Save
+          row_index =  -1  ->  Save, write "routing not found"
+```
+
+### 2.4 Production versions (MM02)
+
+```
+[run] production_version/production_version_main.xaml
+  |   loop: for each Excel row:  open material -> ProdVersions
+  |
+  |-- Switch "Action"
+  |     |
+  |     |-- "Add"    --> add_pd(group, group_counter, resource, tool, material,
+  |     |                       alt_bom_ver, alt_bom_count, in_sort_lub)
+  |     |                  |
+  |     |                  '-- add_production_detail(bom_alt, group, group_counter,
+  |     |                                            tool, resource, sorting)
+  |     |                        1x for one alt BOM, or ALT_BOM_COUNT x for "ALL BOM"
+  |     |
+  |     |-- "DELETE" --> delete_production_version(num_alt_bom, resource, tool, in_sort_lub)
+  |     |
+  |     '-- "CHANGE" --> change_resource(resource_before, resource_after, tool)   (not used today)
+  |
+  '-- Continue, Save, write "done mm02"
+```
+
+### 2.5 Not in the current flow (reference / future "change" features)
+
+```
+change_routing/delete_routing.xaml      --> choose_routing_allocate_bom    (does not delete)
+change_capacity.xaml                    --> change_routing/choose_routing
+change_capacity_molding.xaml            --> change_routing/choose_routing
+change_wc_sap.xaml                      --> delete_routing/choose_routing  (BROKEN path)
+production_version/delete_all_pd.xaml       (no calls)
+change_routing/delete_product_version.xaml  (no calls)
+```
+
+### 2.6 Arguments in detail (what the caller passes)
+
+| Caller | Called file | Argument (direction) = value |
+|---|---|---|
+| create_routing_mold | nested_find_copy_routing | material(In) = `"Material"`, resource(In) = `"Resource"`, in_sort_lub(In) = `"Sorting/ Lubricant"` or Nothing |
+| create_routing_stamping / plt | nested_find_copy_routing | same, in_sort_lub(In) = Nothing |
+| create_routing_as / sameinfo | nested_find_copy_routing | material(In), resource(In) only |
+| nested_find_copy_routing | find_valid_routing_tocopy | material(In) = material, in_sorting_lubricant(In) = in_sort_lub |
+| create_routing_as / stamping / mold | assign_bom_activity | none (so sort_lub = Nothing) |
+| main_bom_assignment | choose_routing_allocate_bom | tool(In) = `"Tool"` trimmed, resource(In) = `"Resource"` trimmed, in_sort_lub(In) = sorting, **row_index(Out)** |
+| main_bom_assignment | assign_bom_activity | sort_lub(In) = sorting |
+| inactive_routing | choose_routing_allocate_bom | tool(In), resource(In), **row_index(Out)** |
+| production_version_main | add_pd | group, group_counter = `"group"`, `"group counter"`; resource; tool = `"Tool"` or `"0"`; material; alt_bom_ver = `"Alt Bom"`; alt_bom_count = `CInt("ALT_BOM_COUNT")`; in_sort_lub |
+| add_pd | add_production_detail | bom_alt = alt BOM (or 1, 2, ... in the ALL BOM loop), group, group_counter, tool, resource, sorting = in_sort_lub |
+| production_version_main | delete_production_version | num_alt_bom = `CInt("ALT_BOM_COUNT")`, resource, tool, in_sort_lub = `"Sorting/ Lubricant"` |
+| production_version_main | change_resource | resource_before, resource_after = `"Resource before"`, `"Resource after"`, tool |
+
+Python equivalent of one call, for orientation:
+
+```python
+row_index = choose_routing_allocate_bom(session, tool=row.tool, resource=row.resource,
+                                        sort_lub=row.sorting)   # -1 = not found
 ```
 
 How values travel: the top-level file owns the Excel row (`CurrentRow`) and passes **plain strings**
@@ -258,7 +330,7 @@ for each Excel row:
 
 `add_pd`: if `Alt Bom` is not `ALL BOM` -> `add_production_detail(bom_alt = Alt Bom)` once; else repeat
 `ALT_BOM_COUNT` times with `bom_alt = 1, 2, ...` (a count, so active alt BOMs 1 and 3 give 1, 2 - wrong
-for gaps, see `python_migration.md` section 6).
+for gaps, see `README.md` Background, SAP facts).
 
 `add_production_detail`:
 ```
@@ -309,7 +381,7 @@ for each row:
 `change_routing/delete_routing.xaml` is the same loop but, instead of the header steps, clicks
 **Material Assignment** (`tbar[1]/btn[31]`) before the search and sets nothing: it marks
 `done ca02` without changing the routing. It looks like an unfinished copy; treat `inactive_routing`
-as the reference (matches decision "set inactive / status" in `python_migration.md`).
+as the reference (matches decision "set inactive / status" in `README.md` Background).
 
 OpCenter side: **not in the UiPath project** (no TPM / workflow steps in any XAML).
 
@@ -321,36 +393,8 @@ OpCenter side: **not in the UiPath project** (no TPM / workflow steps in any XAM
 | `change_capacity_molding` | same file | skip if `done = done`; find routing; `-1` -> Save, `not found`; open 0020 details, read Tool Cavity (`sub/3/txt[0]`), Back; BQ rows 2, 3 = Capacity after, row 4 = Cavity x Capacity after; Save. No sorting case |
 | `change_wc_sap` | `change_wc.xlsx`: Material, Resource before / after, Tool | find routing (**invoke path `delete_routing\choose_routing.xaml` does not exist** -> fails); WC row 1 = Resource after (plating); open row 2 col 6 details, copy WC text into op text; Header; description = `Resource after - Material - Tool`; Save |
 
----
 
-## 8. Risks and defects found (fix in the Python version, do not copy)
-
-1. **No error handling**, no recovery: a popup that is not expected stops the run mid-transaction.
-2. **Hard-coded Excel paths** per file, `plt` reads the stamping file (`master_template\add_routing_stp.xlsx`).
-3. **Positional selection**: alt BOM row = `Alt Bom - 1`; operation rows fixed per department;
-   `FindIndex` result `-1` is clicked without a check in `nested_find_copy_routing`,
-   `find_valid_routing_tocopy`, `change_resource`, `change_capacity`.
-4. **Broken invoke**: `change_wc_sap` -> `delete_routing\choose_routing.xaml` (folder is `change_routing`).
-5. **`delete_routing.xaml` does not delete** (writes `done ca02` only); delete/inactive call
-   `choose_routing_allocate_bom` without `in_sort_lub`.
-6. **Single-routing materials** (SAP skips the list) are reported "routing not found" on delete and
-   are unsafe in `choose_routing*` (no list -> returns `0` = "found", without checking the routing).
-7. **CA01 lubricant rule**: `assign_bom_activity` gets no `sort_lub` from CA01, so lubricant goes to 0020.
-8. **`create_routing_as`**: BOM row off by one between the two popups; status bar is read with the
-   window title "Change Routing: Initial Screen" while on CA01; no transaction call.
-9. **ALL BOM**: handled only in mold (row 0) and `add_pd` (loop over a count); plt / stp `CInt("ALL BOM")` fails.
-10. Inconsistent skip / result columns: `SKIP`, `skip`, `progress`, `done`, `bom assign`;
-    status bar checks differ (`MATERIAL STATUS` vs `E3`).
-11. `production_version_main` Switch keys are case-sensitive (`Add` vs `CHANGE` / `DELETE`);
-    an unknown Action still saves and writes `done mm02`.
-12. PV text not length-checked (40), PV warning popup after Check not handled, existing versions not detected.
-13. Only visible table rows are read (no scrolling) for component, version and routing lists.
-14. Status typed as `4` (released) on create although the activity is named "status 1".
-15. `SaveAfterEachRow = False`: progress written to Excel can be lost on a crash -> reruns repeat SAP work.
-
----
-
-## 9. Mapping to the Python design (input for the planning session)
+## 8. Mapping to the Python design (input for the planning session)
 
 | UiPath piece | Python counterpart | Exists? |
 |---|---|---|

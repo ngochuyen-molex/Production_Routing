@@ -1,7 +1,7 @@
 # Routing automation in Python - architecture (draft for review)
 
 Status: **routing, components and pv phases built, not yet run against SAP** (2026-11-17).
-Background and decisions: `docs/python_migration.md`. UiPath behaviour being replaced: `docs/uipath_flows.md`.
+Background, decisions and SAP facts: `README.md` (Background: replacing UiPath). UiPath behaviour being replaced: `docs/uipath_flows.md`.
 
 ## 0. Implementation status
 
@@ -10,10 +10,31 @@ Background and decisions: `docs/python_migration.md`. UiPath behaviour being rep
 | model | `model/` (enums, entities, requests, result, row_state) | built, tested |
 | pipeline | `pipelines/run.py`, `recipes.py`, `workbook.py` (in the existing `pipelines/` folder, not a new `pipeline/`) | built, tested; `routing run FILE --dry-run` checked against Snowflake |
 | SAP core | `sap/session.py`, `elements.py`, `table.py` | built, **not run against SAP** |
-| routing phase | `sap/screens/ca01.py`, `ca02.py`, `operations.py`, `layouts/`, `resolve/routings.py`, `steps/routing.py` (`CreateRouting`, `InactivateRouting`) | built, fake-SAP test for `InactivateRouting`; **CA01 element ids marked VERIFY** |
+| routing phase | `sap/screens/ca01.py`, `ca02.py`, `operations.py`, `layouts/`, `resolve/routings.py`, `steps/routing.py` (`CreateRouting`, `InactivateRouting`) | built, fake-SAP tests; open element ids: `docs/verification.md` |
 | components phase | `sap/screens/components.py`, `steps/components.py` (`AllocateComponents`) | built (screen code + 0030 / 0020 rule copied from `SAP_automation`), plan tested, **not run against SAP** |
-| pv phase | `sap/screens/mm02.py`, `steps/production_version.py` (`CreateProductionVersion`, `DeleteProductionVersion`), `data/bom.alt_bom_numbers` | built (MM02 create copied from `SAP_automation`; delete button from UiPath, **VERIFY**), plan tested + dry run on Snowflake |
+| pv phase | `sap/screens/mm02.py`, `steps/production_version.py` (`CreateProductionVersion`, `DeleteProductionVersion`), `data/bom.alt_bom_numbers` | built (MM02 create copied from `SAP_automation`; delete button confirmed in 4 UiPath flows), plan tested + dry run on Snowflake |
 | opc phase | - | not built |
+
+Scope = the UiPath files the user runs (`docs/uipath_flows.md` 1.1) and what they invoke:
+
+| UiPath | Python | State |
+|---|---|---|
+| `create_routing_as` / `_plt` / `_stamping` / `_mold` + `nested_find_copy_routing`, `find_valid_routing_tocopy` | Action `Add`, layouts AS / PLT / STP / MD / MD_SORTING, `CreateRouting` | built |
+| `create_routing_sameinfo` | - | **backlog**: not in the code (removed 2026-11-18), design in section 9 |
+| `assign_bom_activity` (inside create) | `AllocateComponents` | built |
+| `bom_assign/main_bom_assignment` + `choose_routing_allocate_bom` | Action **`Assign Components`** -> `AllocateComponents` on an existing routing | built (2026-11-18) |
+| `change_routing/inactive_routing` | Action `Delete` -> `InactivateRouting` | built |
+| `production_version_main`: Add (`add_pd`, `add_production_detail`), DELETE (`delete_production_version`) | `CreateProductionVersion`, `DeleteProductionVersion` | built |
+| `change_resource` | - | **backlog**: planned as Delete old + Create new (section 9) |
+| `delete_pd_textdesc`, `delete_all_pd`, `delete_product_version`, `delete_routing`, `change_capacity*`, `change_wc_sap`, `change_routing/choose_routing` | - | **out of scope** (not run / not invoked by the files above) |
+
+Assign Components (UiPath `main_bom_assignment`): the routing is found like Delete (group / group
+counter, else resource + tool + sorting; several matches -> skip, never guess; flagged -> skip);
+alt BOM from `Alt Bom` (number or ALL BOM). UiPath only ran rows with `ALT_BOM_COUNT = 2` and always
+alt BOM 2; that filter is dropped.
+
+**Verification checklist** (what is checked, what is still open, popup branching, element ids,
+copy source rules, blank values, final step): **[docs/verification.md](verification.md)** - the only place.
 
 Production versions (pv phase):
 - **Create**: one version per wanted alt BOM **that has none yet** on the routing. `ALL BOM` =
@@ -32,16 +53,9 @@ Components phase:
 - Only Create rows whose layout allocates components (not PLT) and `Assign Components` not "No";
   one CA02 pass per alt BOM (one alt BOM, or every active one for ALL BOM), alt BOM picked by value.
 - Rule copied as is: packaging -> 0030, lubricant -> 0030 when the 0030 work center is YMHI /
-  YMHI-1, else 0020; only unassigned rows are touched (safe to rerun). Open question: in a sorting
-  routing 0030 is the YMHI step, so packaging also goes to 0030, not to the final pack step (same as
-  `SAP_automation` and UiPath today) - confirm.
+  YMHI-1, else 0020; only unassigned rows are touched (safe to rerun).
 - Only the visible page of the component table is read (as `SAP_automation`); a warning is written
   when the table has more rows.
-
-Before the first live run: record one CA01 copy (`.vbs`) and one CA02 operation overview to confirm
-the `VERIFY` ids in `sap/elements.py` (copy list columns, operation row base, work center column
-title), then run one row with `--rows N --slow`. Layouts stay `verified=False` (a Plan warning)
-until one routing per layout was created and checked.
 
 Choices made while building:
 - **Planning reads all routings of the input materials once** (`data/routing.routing_operations`:
@@ -57,8 +71,8 @@ Choices made while building:
   Some departments (e.g. **PLT**) have no tool or lubricant to tell routings apart, so when more
   than one active routing matches, the row is skipped with `N routings match (G/C, ...), fill
   group / group counter` instead of deleting the first match.
-- **No compatible copy source** is a Plan **warning**, not a skip (as agreed); example: every
-  routing of 5052760989 has YMHI-1 at 0030, so a plain MD create has no matching source.
+- **Copy source**: rules in `docs/verification.md` C (a source with the wrong sorting shape is
+  never copied; a layout misfit otherwise is a Plan warning).
 - **Copy source override**: the planner writes its pick to `COPY_FROM_PLANNED` (information only).
   To copy from another routing, type group / counter in `COPY_FROM_GROUP` / `COPY_FROM_GC`; only
   the user fills these, so the planner's own pick never becomes a fixed override. An override must
@@ -122,8 +136,7 @@ The first version of the resolver was a seventh variant; it now uses the routing
 - **before / after on real data**: both checks gave identical output for the same input
   (8 routing condition rows incl. inactive / not at plant, 4 pv rows incl. ALL BOM / blank group);
 - still own logic, to switch next (each with a before / after run): `checks/operation_values.py`
-  (matching + roles: today final = PP94 only, `Routing.operation` also accepts ZP04 - switching
-  changes its output for ZP04 routings, see `docs/operation_values.md` gap 3), `checks/delete_status.py`,
+(matching + roles: final = PP94 only in both, ZP04 = trial routing, see `docs/operation_values.md` gap 3), `checks/delete_status.py`,
   `checks/routings_by_tool.py`, `checks/production_version.py` lookups.
 
 Other overlaps:
@@ -131,7 +144,7 @@ Other overlaps:
   `deleted_status_0020`; the old ones can be derived from it once the checks share the matcher.
 - `checks/pv_exist` Alt Bom parsing: **done**, uses `AltBomChoice.parse`.
 - Operation roles: `checks/operation_values.pick_operations` (0020 / YMHI / PP94) and
-  `layouts/select.check_copy_source` (YMHI / PP94 or ZP04) define the same roles differently.
+  `layouts/select.check_copy_source` (YMHI / PP94) define the same roles in two places (same rules now).
 - Future pv phase must reuse `data/production_version.by_routing` and `data/bom` (not new queries).
 
 ---
@@ -192,8 +205,8 @@ Everything a phase needs about "which routing" is the **routing key**:
           Action, Material, Resource,   ──►    plan:    COPY_FROM_GROUP, COPY_FROM_GC, ALT_BOMS, STEPS
           Tool, Dept, Capacity, Alt Bom,       results: group, group counter      (routing phase)
           Tool Cavity, Sorting, ...                     RESULT_ROUTING            (routing phase)
-                                                        RESULT_COMPONENTS         (components phase)
-                                                        RESULT_PV, PV_CREATED     (pv phase)
+                                                        RESULT_COMPALLOC          (components phase)
+                                                        RESULT_MM02               (pv phase)
                                                         RESULT_OPC                (opc phase)
 ```
 
@@ -404,7 +417,7 @@ and / or OpCenter rule only where it differs.
 
 | Option | How | For | Against |
 |---|---|---|---|
-| Move | cut the code out of `SAP_automation`, `SAP_automation` imports it back from `routing.sap` | one copy of the code | changes `SAP_automation`, which must stay as it is (`python_migration.md`); its BOM scripts (`bom*.py`) break if the move goes wrong |
+| Move | cut the code out of `SAP_automation`, `SAP_automation` imports it back from `routing.sap` | one copy of the code | changes `SAP_automation`, which must stay as it is (`README.md` Background); its BOM scripts (`bom*.py`) break if the move goes wrong |
 | Import | `routing.sap` calls `change_bom` modules directly (`sys.path` or a path dependency) | no duplicated code, fixes in one place | `change_bom` is flat scripts, not a package (no `pyproject.toml`); its names `config`, `workbook`, `utils`, `models` clash with ours; screen code is mixed with Excel / Snowflake / status handling (`models.py`), which breaks the rule "`sap/` has no business rules"; a change there can silently break a routing run |
 | **Copy** (chosen) | copy only the screen code into `sap/`, adapt it to `session.py` / `elements.py` / `model/` | `SAP_automation` untouched and keeps running; `sap/` stays clean and testable; no hidden dependency | two copies; a fix in one must be copied to the other by hand |
 
@@ -455,7 +468,7 @@ class Routing:
 
     def operation(self, role: OperationRole) -> Operation | None:
         """THE role rule (from checks/operation_values): production 0020, sorting YMHI after it,
-        final PP94 (or ZP04) = last operation."""
+        final PP94 = last operation (ZP04 = trial routing, never final)."""
 
     def fits(self, layout) -> list[str]:        # today: layouts.select.check_copy_source
         ...
@@ -656,7 +669,7 @@ class RowState:
 
 ```python
 class Step:
-    name: str          # also the result column, e.g. "CreateRouting" -> RESULT_CreateRouting
+    name: str          # result column via workbook.RESULT_COLUMNS, e.g. "CreateRouting" -> RESULT_ROUTING
     phase: str         # "routing" | "components" | "pv" | "opc"
     needs_sap: bool = True
 
@@ -831,17 +844,32 @@ Written back:
 |---|---|
 | `group`, `group counter` | routing phase (from the SAP screen) or the planner (Snowflake) |
 | `PLAN_STEPS`, `COPY_FROM_GROUP`, `COPY_FROM_GC`, `PLAN_WARNINGS` | planner |
-| `RESULT_<step>` (`Done` / `Skipped: ...` / `Failed: ...`) | each step |
+| `RESULT_ROUTING`, `RESULT_COMPALLOC`, `RESULT_MM02` (`Done` / `Skipped: ...` / `Failed: ...`), `RESULT_INPUT` | each step, see 7.1 |
 | sheet **Plan** | planner, one row per request + its planned steps |
 | sheet **Run log** | runner, one row per step run: time, row, step, status, message |
 
 ### 7.1 Progress and resume (replaces UiPath's `progress` column)
 
-UiPath writes a progress text per row and skips the row on the next run
-(`docs/uipath_flows.md` 3.1, 6, 7.1). The same idea is kept, but **per step**, in one column per
-step, with the same statuses everywhere:
+UiPath writes one progress text per row (`done ca01`, `done mm02`, ...) and skips the row on the
+next run. Python keeps the idea but with **one result column per kind of work**, the same statuses
+everywhere, and does **not read the old `progress` column** (decided 2026-11-18):
 
-| Status in `RESULT_<step>` | Meaning | On a rerun |
+| Column | Step(s) | Filled for Action |
+|---|---|---|
+| `RESULT_ROUTING` | CA01 create routing (`CreateRouting`) / CA02 deletion flag + status 1 (`InactivateRouting`) | Add / Delete |
+| `RESULT_COMPALLOC` | CA02 component allocation (`AllocateComponents`) | Add (not PLT), Assign Components |
+| `RESULT_MM02` | MM02 production versions created (`CreateProductionVersion`) / deleted (`DeleteProductionVersion`) | Add / Delete |
+| `RESULT_INPUT` | row could not be read (unknown Action, Capacity missing, ...) - nothing runs for it | any |
+| (later) `RESULT_OPC` | OpCenter TPM / workflow files | Add / Delete |
+
+A row has one Action, so Add and Delete share `RESULT_ROUTING` and `RESULT_MM02`. Mapping in
+code: `pipelines/workbook.RESULT_COLUMNS`. Example after an Add row:
+
+| RESULT_ROUTING | RESULT_COMPALLOC | RESULT_MM02 |
+|---|---|---|
+| `Done: M0629201/11 copied from M0629201/10` | `Done: B1 0030: 2, 0020: 5` | `Done: 0004 (B1)` |
+
+| Status in a result column | Meaning | On a rerun |
 |---|---|---|
 | `Done` (+ detail, e.g. `Done: 0006 (B2)`) | step finished in SAP / file | skipped |
 | `Skipped: <reason>` (e.g. `Skipped: routing not found`, `Skipped: material status E3`) | nothing to do, final | skipped |
@@ -849,27 +877,15 @@ step, with the same statuses everywhere:
 | blank | not run yet | run |
 
 A row whose step failed does not continue to the later phases (no production version for a
-routing that was not created). `--retry-skipped` can force skipped steps to run again.
-
-Reading UiPath progress while both tools run side by side: an existing value in the old columns is
-read as `Done` for the matching step, so Python never repeats work UiPath already did:
-
-| UiPath column = value | Read as |
-|---|---|
-| `progress = done ca01` | `CreateRouting` done |
-| `bom assign = done` | `AllocateComponents` done (alt BOM 2 pass) |
-| `progress = done mm02` | production version step of the row's action done |
-| `progress = done ca02` | `InactivateRouting` done |
-| `progress = routing not found` | `InactivateRouting` skipped: routing not found |
-| `progress = skip`, `done = skip` | row skipped (material status E3 / not exist) |
-| `SKIP = 1` (routing condition) | `CreateRouting` skipped: routing already exists |
-| `SKIP = 3` (routing condition) | `CreateRouting` skipped: routing inactive (untick the deletion flag instead) |
+routing that was not created). To force a step again, clear its result cell.
 
 Differences from UiPath, on purpose:
-- one column per step instead of one shared `progress` text that the next step overwrites;
+- one column per kind of work instead of one shared `progress` text that the next step overwrites;
 - the file is saved **after every row** (UiPath: `SaveAfterEachRow = False`, progress lost on a crash);
 - a `Failed` step is retried, an unknown error never writes `done` (UiPath writes `done mm02` even
-  for an unknown Action).
+  for an unknown Action);
+- the UiPath `progress` column is left as it is and ignored; rows already done by UiPath are
+  recognised by the planner instead ("routing already exists", "versions exist").
 
 ## 8. Build order
 
@@ -912,14 +928,71 @@ What is new / to decide then:
 - the copied routing's description / operations belong to the other material: check the layout
   fit and that work centers / tools make sense for the new material.
 
+### Backlog: side requests on top of the backbone (decided 2026-11-18)
+
+Not frequent; developed later, only if needed, on top of the backbone (Create / Delete / Assign
+Components + pv + opc). Nothing in the backbone has to change for them.
+
+#### Create routing "same info" (UiPath `add_routing/create_routing_sameinfo`)
+
+Status: **backlog, not in the code** (a first draft was removed again on 2026-11-18 to keep the
+backbone clean).
+
+What UiPath does: another routing like the one the resource already has, **keeping its tool**.
+Excel: Material, Resource, Capacity (no Tool). CA01 copy (same helpers as Create), alt BOM row 0,
+header: read group / counter, status 4; operation overview: work center row 2 = Resource, **read the
+tool from row 3**, Header (F5) -> description `Resource - Material - <tool>`, Operations; base quantity
+= Capacity on rows 1 and 2; CompAlloc: first component -> 0020; save.
+
+Design when it is picked up (reuses the backbone, no new SAP screens):
+
+| Part | How |
+|---|---|
+| Input | Create row + opt-in column `Same Info` = Yes (not automatic on a blank Tool: a forgotten Tool would silently copy another routing's tool) |
+| Layout | new `LAYOUTS["SAMEINFO"]`: production row 2 = Resource + Capacity, tool row 3 kept, row 1 Capacity; flag "tool from copy" |
+| Plan | skip the "routing already exists" check (a routing with the resource always exists); copy source = newest status-4 routing with the Resource as work center, or COPY_FROM_GROUP / _GC; warn when several qualify; skip when none |
+| Run | `fill_header` without description -> set work centers -> read tool at row 3 -> Header (F5), type description, Operations -> base quantities -> save |
+| Components / pv / opc | normal `AllocateComponents` rule (not UiPath's "first component to 0020"), versions from the new description |
+| Verify | layout rows (rows 1 / 2 come from the XAML only), description length (only known after the tool is read), pv rerun within the ~15 min Snowflake lag cannot rebuild the description |
+
+#### Change resource (UiPath `production_version/change_resource`)
+
+A resource change is not one edit. It touches four places:
+
+| Where | What changes | Today in UiPath |
+|---|---|---|
+| CA02 operation overview | work center of the production operation (old resource -> new) | not done (`change_wc_sap` is separate, not run) |
+| CA02 header | routing description `<old resource> - ...` -> `<new resource> - ...` | not done |
+| MM02 production versions | version text `<old resource> - <tool> B<n>` -> new resource | `change_resource`: overwrites the text, drops ` B<n>`, no not-found check |
+| OpCenter | TPM / workflow names with the old resource: delete old, add new | not done |
+
+Editing all four in place means a new CA02 change flow, a MM02 text edit, and keeping routing,
+versions and OpCenter names in step - complex, with many half-done states to resume from.
+
+**Preferred approach: delete old + create new** with the steps that already exist:
+
+| Excel row | Action | Steps it runs |
+|---|---|---|
+| 1 | `Delete`, old Resource (+ Tool, or group / group counter) | `InactivateRouting` (deletion flag + status 1), `DeleteProductionVersion`, opc: delete old TPM / workflow |
+| 2 | `Create`, new Resource, same Tool, capacity etc. | `CreateRouting` (copy, status 4), `AllocateComponents`, `CreateProductionVersion`, opc: add new TPM / workflow |
+
+Why: no new SAP screens or edit logic; names in routing, versions and OpCenter are consistent by
+construction (all built from the new resource); resume / logging work as for any Create and Delete;
+the old routing stays in SAP as inactive (deletion flag, reactivatable) for history.
+
+To decide when it is picked up:
+- a convenience action `Change Resource` (columns `Resource before` / `Resource after`) that the
+  planner expands into the Delete + Create pair, or just two rows written by the user;
+- order: deletes run first today (`parse_rows`), so the old routing is inactive before the new one
+  is copied - the copy source must then be another active routing (planner picks it, or
+  `COPY_FROM_GROUP` / `_GC`), or the order must be Create first, Delete second for this pair;
+- the new production version numbers differ from the old ones (new versions, not renamed) -
+  check that nothing downstream depends on the old version numbers.
+
 ### Other open points
 
 - `SAP_automation\change_bom`: after the copy (section 5.4), does it keep its CA02 / MM02 scripts,
   or are they retired once `routing run` covers that work? Until then, fixes must be copied both ways.
 - OpCenter files at the end of a run, only for successful rows: proposed, to be confirmed.
-- `create_routing_sameinfo`: separate recipe or an option on Create - to be clarified.
-- Delete order inside a row (versions before routing): confirm against UiPath / SAP.
-- Layout row numbers in 6.6 must be checked on a real SAP screen (UiPath row base, `uipath_flows.md` 4.2).
-- Workflow types: are there more than `AS`, `PLT`, `STP`, `MD`, `MD_SORTING` (e.g. AS with
-  sorting, STP with sorting, hi-coat / regrinding YMHI at 0020, automation cutting before
-  assembly, plating with rewind)? Each confirmed type = one `LAYOUTS` entry.
+- Checks still open on SAP (delete order, layout rows, element ids, workflow types, ...):
+  `docs/verification.md` checklist.
