@@ -8,21 +8,62 @@ decisions and SAP facts: [Background: replacing UiPath](#background-replacing-ui
 
 ## Routing requests in SAP (in progress)
 
+Built: routing (create in CA01, inactivate in CA02), components (CA02) and production versions
+(MM02). OpCenter phase not built yet.
+
+### Before every run
+
+1. Setup done once (section [Setup](#setup-once)), plus `pip install -e ".[sap]"` (pywin32 for SAP GUI scripting).
+2. In a new terminal: `cd C:\Users\nguyeb3\Downloads\ROUTING` and `.\.venv\Scripts\Activate.ps1`.
+3. SAP GUI open and logged in (not needed for `--dry-run`).
+4. The request Excel file is **closed** - results are saved into it after every row; if it is open
+   the run stops with "close it in Excel".
+
+### First test run, step by step
+
 ```powershell
-pip install -e ".[sap]"                          # pywin32 for SAP GUI scripting
-routing run FILE --dry-run                       # plan only: Plan sheet, SAP untouched
-routing run FILE --rows 5 --slow                 # one row, slow, while watching SAP
-routing run FILE [--phase routing] [--only add|delete|"assign components"]
+routing run "C:\path\requests.xlsx" --dry-run          # 1. plan only, SAP untouched -> check the Plan sheet
+routing run "C:\path\requests.xlsx" --rows 2 --slow    # 2. one row, slow, while watching SAP
+routing run "C:\path\requests.xlsx"                    # 3. all rows
 ```
 
-One sheet, one row per request (`Action` = Add / Delete / Assign Components; `Create` is also accepted; `Dept`, `Material`,
-`Resource`, `Tool`, `Capacity`, `Tool Cavity`, `Efficiency`, `Utilization`, `Sorting/ Lubricant`, ...,
-`Alt Bom`). `Same Info` and Change Resource are backlog (docs/architecture.md section 9).
-Results go to `RESULT_ROUTING` (CA01 / CA02), `RESULT_COMPALLOC` (component allocation) and
-`RESULT_MM02` (production versions) - `Done: ...` / `Skipped: ...` / `Failed: ...` - plus `group` /
-`group counter`, a **Plan** and a **Run log** sheet; reruns skip Done / Skipped steps and retry
-Failed ones. The old UiPath `progress` column is not read. Built: routing (create in CA01, inactivate in CA02), components (CA02)
-and production versions (MM02); not run against SAP yet, OpCenter phase not built.
+| Option | Meaning |
+|---|---|
+| `--dry-run` | plan only: writes the **Plan** sheet (steps, layout, copy source, target routing, alt BOMs, skip reasons, warnings, errors); SAP is not touched |
+| `--rows 5-12` / `--rows 5,7,9` | only these **Excel row numbers** (row 2 = first data row) |
+| `--only add` / `delete` / `"assign components"` | only rows with this `Action` |
+| `--phase routing` / `components` / `pv` | only this phase (repeat for several); default all, in that order |
+| `--slow` | wait after every SAP action, to watch / debug |
+| `--sheet NAME` | request sheet (default: first sheet) |
+
+If FILE is left out you are asked for it (drag & drop works).
+
+### Input
+
+One sheet, one row per request: `Action` (Add / Delete / Assign Components; `Create` is also
+accepted), `Dept`, `Material`, `Resource`, `Tool`, `Capacity`, `Tool Cavity`, `Efficiency`,
+`Utilization`, `Sorting/ Lubricant`, ..., `Alt Bom` (number, `B2`, `ALL BOM`; blank = 1).
+`Same Info` and Change Resource are backlog (docs/architecture.md section 9).
+
+### Output (written into the same file)
+
+| Where | What |
+|---|---|
+| `RESULT_ROUTING` | CA01 create (Add) / CA02 deletion flag + status 1 (Delete) |
+| `RESULT_COMPALLOC` | component allocation (CA02), e.g. `Done: B1 0030: 2, 0020: 1` |
+| `RESULT_MM02` | MM02 production versions created (Add) / deleted (Delete) |
+| `RESULT_INPUT` | row not valid (reason) |
+| `group`, `group counter` | routing key, filled when known |
+| sheet **Plan** | the plan of the last run (replaced each run) |
+| sheet **Run log** | one line per step: time, row, material, step, status, message |
+
+Each result cell is `Done: ...`, `Skipped: ...` or `Failed: ...`. **Re-running is safe**: Done and
+Skipped steps are not run again, Failed ones are retried - fix the cause and run the same command.
+The old UiPath `progress` column is not read.
+
+**Re-using an Add row for Delete:** Add and Delete share `RESULT_ROUTING` / `RESULT_MM02`, so a
+`Done` from the create would make the delete look finished. Clear those two cells on the row
+first (keep `group` / `group counter`, they pin the exact routing).
 Design and status: [`docs/architecture.md`](docs/architecture.md); what is checked / still open:
 [`docs/verification.md`](docs/verification.md).
 
@@ -61,7 +102,7 @@ routing check operation-values FILE [--sheet Sheet1]
 routing check routings-by-tool FILE
 routing check tpm-exist FILE
 routing check pv-count | pv-by-group | pv-by-attributes | pv-fallback FILE [--sheet Sheet1]
-ne_routing check pv-exist FILE [-o OUT] [--sheet Sheet1]
+routing check pv-exist FILE [-o OUT] [--sheet Sheet1]
 routing opc add-tpm | add-workflow | compare-workflow | delete-tpm |
             update-tpm-priority  [-i INPUT] [-o OUTPUT]
 ```

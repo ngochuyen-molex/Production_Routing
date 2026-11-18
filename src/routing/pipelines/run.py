@@ -10,6 +10,11 @@ from routing.pipelines.workbook import RequestWorkbook
 from routing.sap.session import SapSkip
 from routing.steps.base import Context
 
+# Plant material status (MARC.MMSTA) that SAP refuses for CA01 / CA02 / MM02: the whole row is
+# skipped while planning. Other statuses (S1 "S+E in this plant", S2 "S+E in other plants") go
+# ahead; their SAP warning gets an extra Enter (SapSession.pass_warnings).
+SKIP_MATERIAL_STATUSES = {"E3": "not active in this plant"}
+
 
 @dataclass
 class RunSummary:
@@ -47,12 +52,18 @@ def parse_rows(rows, only=None, row_numbers=None):
 
 
 def plan_rows(states, ctx, phases=PHASES, recipes=recipe_book.RECIPES):
-    ctx.load_routings([s.request.material for s in states])
+    materials = [s.request.material for s in states]
+    ctx.load_routings(materials)
+    ctx.load_material_status(materials)
     for row in states:
         steps = recipe_book.steps_for(row, phases, recipes)
         row.plan.steps = [s.name for s in steps]
+        status = ctx.material_status(row.request.material)
         for step in steps:
             if row.done(step.name):
+                continue
+            if status in SKIP_MATERIAL_STATUSES:        # SAP would refuse it: never open CA01 / CA02 / MM02
+                row.plan.skip[step.name] = f"material status {status} ({SKIP_MATERIAL_STATUSES[status]})"
                 continue
             try:
                 step.plan(row, ctx)

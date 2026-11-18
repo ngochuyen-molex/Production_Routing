@@ -15,8 +15,12 @@ Nothing has been run against real SAP yet.
 - [x] CA01 copy dialog: "Select Type", "Select Object to be Copied", copy list 2120 each shown or
       not; nothing shown -> only with 1 routing of the material (UiPath `find_valid_routing_tocopy`) (2026-11-18)
 - [x] "Choose Alternative BOM": row by AltBOM value; BOM usage other than 1 -> stop (2026-11-18)
-- [x] Material refused on the first screen (`MATERIAL STATUS`, `E3`, `NOT EXIST`) -> row Skipped;
-      warning -> one extra Enter (2026-11-18)
+- [x] Material status (CA01, CA02, MM02 alike): **E3** (not active in this plant) -> every step of
+      the row Skipped **while planning** from Snowflake MARC.MMSTA, SAP is never opened; **S1 / S2**
+      (S+E in this / other plants) -> planned normally, their SAP warning gets an extra Enter (max 2);
+      safety net in SAP: `E3` / `NOT EXIST` in the status bar -> Skipped (2026-11-18)
+- [ ] Material status S1 / S2 on a real SAP screen: confirm they only give a warning (test rows 11-13
+      of `add_routing_test.xlsx`); an error message would make the step Failed instead
 - [x] MM02 delete version: button `btn[14]`, no confirmation popup; unexpected popup -> stop (2026-11-18)
 - [x] All element ids match the UiPath selectors (`docs/uipath/ui_elements.csv`) (2026-11-18)
 - [ ] Copy list 2120 group / counter columns (0 / 1) - record with the SAP GUI script recorder
@@ -43,6 +47,32 @@ Nothing has been run against real SAP yet.
 - [ ] Packaging -> 0030 also in sorting routings (0030 = YMHI, not the pack step) - confirm
 - [ ] More workflow types than AS, PLT, STP, MD, MD_SORTING (AS / STP with sorting, hi-coat,
       regrinding, automation cutting, plating with rewind)? each = one `LAYOUTS` entry
+- [ ] **C_AUTO assembly routings do not fit the AS layout** (found 2026-11-18, test rows 16-17).
+      AS layout = 0010 XQA, 0020 machine (overview row 1), 0030 PP94 final (row 2). C_AUTO routings
+      have extra steps: 0020 `C_AUTO`, 0030 `C_FN` / `C_RN`, 0040 `C_FE` / `C_RE` (MC01), PP94 only at
+      0050 / 0060 - so Capacity would be typed into 0030 `C_FN` instead of the final step.
+      Proposal: new layout `AS_AUTO` (0020 = Resource, later steps keep the copied work center) and
+      a Plan warning when PP94 is not on the row the layout expects. **Decision needed: which rows
+      get Capacity** - in Snowflake every step 0020 .. PP94 of these routings has the same base
+      quantity (e.g. 332 on 0020, 0030, 0040, 0050), so either type Capacity on every step, or only
+      on 0020 + PP94. Until then: run these rows with `--phase routing` and check them in SAP.
+- [ ] **Delete after Add on the same rows needs clearing result cells** (found 2026-11-18). Add and
+      Delete share `RESULT_ROUTING` / `RESULT_MM02`; a `Done` from the Add run makes the Delete steps
+      count as done. Today: clear those cells before the Delete run (H.5). Proposal: a result only
+      counts for the Action that wrote it (e.g. `Done (Add): ...`).
+- [ ] Production version planned for an **inactive alt BOM** (`Alt Bom` = 1 when only 2 is active):
+      component allocation is skipped, the pv step only warns. Proposal: skip it the same way
+      (`alt BOM 1 not active (active: 2)`).
+- [ ] Dry run does not fix the Delete target (the real run plans again). Proposal: the dry run
+      writes the planned group / group counter into Delete rows.
+- [ ] `routing check routing-condition` still counts trial routings as existing (H.3) - keep or
+      follow the automation's trial rule?
+- [ ] Action `Assign Components` on a plating (PLT) row still allocates components (Add excludes
+      PLT: plating needs a new BOM). Proposal: skip PLT for Assign Components too.
+- [ ] Full SAP flow of `CreateRouting`, `CreateProductionVersion`, `DeleteProductionVersion` is only
+      tested at planning level / partly with a fake SAP; the first live runs are the real test.
+- [ ] Overlap: `checks/operation_values.py`, `delete_status.py`, `routings_by_tool.py` still have
+      their own matching instead of the shared rule (`model/entities.py`) - clean up later.
 
 ### Scope
 - [x] Only the UiPath files that are run (and what they invoke) are migrated (`architecture.md` 0) (2026-11-18)
@@ -50,7 +80,9 @@ Nothing has been run against real SAP yet.
 - [x] All 15 UiPath risks / defects (former `uipath_flows.md` section 8) handled or out of scope; see G (2026-11-18)
 - [ ] Component table: only the visible page is read (as `SAP_automation` and UiPath) - scroll if
       a material has more components than fit on one page (a warning is written today)
-- [ ] opc phase (TPM / workflow files) - not built; "files at the end of the run" to be confirmed
+- [ ] opc phase (TPM / workflow files) - not built in `routing run`. **For now run separately**
+      with the existing commands (`routing opc add-tpm`, `add-workflow`, `delete-tpm`) after the SAP
+      run (decided 2026-11-18); workflow inactivation has no generator yet
 
 ---
 
@@ -70,7 +102,7 @@ Each case has a fake-SAP test in `tests/test_routing_run.py`.
 | | copy list 2120 -> pick by group + counter (UiPath: first status-4 non-TRIAL, YMHI in name when sorting) | done |
 | | none of them -> SAP copied the only routing and went on (BOM popup / header) | only when the material has 1 routing, else error |
 | CA01 / components alt BOM (`ca01.choose_alt_bom`) | "Choose Alternative BOM" -> row by AltBOM value, usage must be 1; not shown -> header | done |
-| CA01 / CA02 / MM02 first screen (`SapSession.check_initial`) | `MATERIAL STATUS`, `E3` (as a word), `NOT EXIST` -> step **Skipped** (`SapSkip`); W message -> extra Enter (max 2) | done |
+| CA01 / CA02 / MM02 first screen (`SapSession.check_initial`) | E3 rows never get here (skipped while planning); `E3` (as a word) or `NOT EXIST` in the status bar -> step **Skipped** (`SapSkip`); any other W message, incl. material status S1 / S2 -> extra Enter (max 2) | done |
 | MM02 delete version (`mm02.delete_version`) | no confirmation popup in UiPath; any popup -> stop with its text | done |
 
 UiPath differences: it typed material / plant only after "Select Type", never checked a missing
@@ -220,7 +252,7 @@ The list found in the UiPath project (formerly `docs/uipath_flows.md` section 8,
 | 7 | CA01 lubricant rule gets no `sort_lub` -> lubricant to 0020 | The 0030 work center comes from the routing's operations (or the row's `Sorting/ Lubricant` for a new routing) (F) |
 | 8 | `create_routing_as`: alt BOM row off by one, status bar read with the CA02 window title, no transaction call | Alt BOM by value; status bar read from the session (no window title); every row starts with `/nCA01` / `/nCA02` / `/nMM02`. All popup combinations before the alt BOM popup (target group 2110, Select Type, Select Object, copy list 2120, none of them) are handled (A) |
 | 9 | ALL BOM only in mold and `add_pd`; `CInt("ALL BOM")` fails in plt / stp | `Alt Bom` is parsed once for every department (number, `B2`, `ALL BOM`, blank = 1; anything else -> row invalid). ALL BOM = every active alt BOM by real number for components (F) and production versions; in the CA01 copy popup the first active alt BOM is chosen |
-| 10 | Inconsistent skip / result columns; status bar checks differ (`MATERIAL STATUS` vs `E3`) | One result column per kind of work - `RESULT_ROUTING`, `RESULT_COMPALLOC`, `RESULT_MM02` (`Done` / `Skipped` / `Failed: reason`), `RESULT_INPUT` for unreadable rows - + Plan + Run log sheets (`architecture.md` 7.1); the old UiPath `progress` column is not read; one skip rule for all transactions (`MATERIAL STATUS`, `E3`, `NOT EXIST`) (A) |
+| 10 | Inconsistent skip / result columns; status bar checks differ (`MATERIAL STATUS` vs `E3`) | One result column per kind of work - `RESULT_ROUTING`, `RESULT_COMPALLOC`, `RESULT_MM02` (`Done` / `Skipped` / `Failed: reason`), `RESULT_INPUT` for unreadable rows - + Plan + Run log sheets (`architecture.md` 7.1); the old UiPath `progress` column is not read; one skip rule for all transactions (E3 skipped while planning; `E3` / `NOT EXIST` in SAP as safety net) (A) |
 | 11 | Switch keys case-sensitive (`Add` vs `CHANGE`); an unknown Action still saves and writes `done mm02` | `Action` is case-insensitive (`Add`, `add`, ` ADD `; `Create` accepted as alias); an unknown value makes the row **invalid before anything runs** (listed on the Plan sheet), SAP is never opened for it. Test: `test_action_is_case_insensitive_and_unknown_action_does_nothing` |
 | 12 | PV text not length-checked, warning popup after Check ignored, existing versions not detected | Text checked / shortened to 40 before the run; the Check popup text is kept as a warning; existing versions (Snowflake) are skipped, only missing alt BOMs get a version |
 | 13 | Only visible rows read (no scrolling) | Routing, group and version lists are paged (`sap/table.find_row`); the component table still reads the visible page only - open item in the checklist |
@@ -229,8 +261,8 @@ The list found in the UiPath project (formerly `docs/uipath_flows.md` section 8,
 
 **Double Enter (UiPath sends a second Enter in CA01 / CA02).** After Enter on the first screen of
 CA01 / CA02 / MM02 and after the CA01 header (status 4), a warning (W) in the status bar gets one
-more Enter, at most 2 (`SapSession.pass_warnings`); an error (E) stops the step; a material-status
-message skips the row. The MM02 "select views" and "organizational levels" popups each get their
+more Enter, at most 2 (`SapSession.pass_warnings`); an error (E) stops the step; only `E3` /
+`NOT EXIST` skip the row (E3 rows are normally skipped while planning already). The MM02 "select views" and "organizational levels" popups each get their
 own Enter (`mm02.open_versions`). Test: `test_initial_screen_warning_gets_extra_enter`.
 
 ## H. Which routing a row means (Delete, Assign Components, "already exists" on Add)

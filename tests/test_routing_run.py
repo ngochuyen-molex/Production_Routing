@@ -161,15 +161,20 @@ def test_routings_from_operations_groups_operations():
 class FakeContext(Context):
     """Routings / versions / alt BOMs given up front; SAP is a fake object or absent."""
 
-    def __init__(self, routings_by_material, sap=None, dry_run=False, versions=None, alt_boms=None):
+    def __init__(self, routings_by_material, sap=None, dry_run=False, versions=None, alt_boms=None, statuses=None):
         super().__init__(dry_run=dry_run, sf=object(), sap=sap)
         self._routings = {m: MaterialRoutings(m, tuple(r)) for m, r in routings_by_material.items()}
         self._fake_versions = versions or {}
         self._fake_alt_boms = alt_boms or {}
+        self._fake_statuses = statuses or {}
 
     def load_routings(self, materials):
         for m in materials:
             self._routings.setdefault(m, MaterialRoutings(m))
+
+    def load_material_status(self, materials):
+        for m in materials:
+            self._status.setdefault(m, self._fake_statuses.get(m, ""))
 
     def versions(self, material):
         return MaterialVersions(material, tuple(self._fake_versions.get(material, ())))
@@ -323,14 +328,31 @@ def status_sap(kind, text):
     return fake, SapSession(fake)
 
 
-def test_initial_screen_skips_material_status_like_uipath():
+def test_initial_screen_skips_e3_and_not_exist_but_not_other_material_status():
     from routing.sap.session import SapError, SapSkip
-    for text in ("Material 5013300800 has status E3", "Material does not exist",
-                 "Material status 'Blocked' is set"):
+    for text in ("Material 5013300800 has status E3", "Material does not exist"):
         with pytest.raises(SapSkip):
             status_sap("W", text)[1].check_initial("CA02 x")
+    fake, sap = status_sap("W", "Plant-specific material status S1 'S+E in this plant' is set")
+    sap.check_initial("CA02 x")                                     # S1 / S2: Enter, no skip
+    assert [a for a in fake.actions if a[0] == "vkey"] == [("vkey", 0, None)] * 2
     with pytest.raises(SapError):
         status_sap("E", "Group ME31 locked by user")[1].check_initial("CA02 x")    # E3 only as a word
+
+
+def test_e3_material_is_skipped_while_planning_for_every_action():
+    ctx = FakeContext({MAT: [routing("15", "MF15-17 - L505276A", MOLD)]}, statuses={MAT: "E3"})
+    for values in (create_row(),
+                   {"Action": "Delete", "Dept": "MD", "Material": MAT, "Resource": "MF15-17", "Tool": "L505276A"},
+                   {"Action": "Assign Components", "Dept": "MD", "Material": MAT, "Resource": "MF15-17",
+                    "Tool": "L505276A"}):
+        row = runner.RowState(request=request_from_row(2, values))
+        runner.plan_rows([row], ctx)
+        assert row.plan.steps and all(row.plan.skip[s] == "material status E3 (not active in this plant)"
+                                      for s in row.plan.steps)
+    ok = runner.RowState(request=request_from_row(2, create_row()))
+    runner.plan_rows([ok], FakeContext({MAT: [routing("15", "MF15-17 - L505276A", MOLD)]}, statuses={MAT: "S1"}))
+    assert "CreateRouting" not in ok.plan.skip                     # S1 / S2 are planned normally
 
 
 def test_initial_screen_warning_gets_extra_enter():

@@ -26,8 +26,10 @@ class SapSkip(SapError):
     UiPath: status bar contains MATERIAL STATUS / E3 / NOT EXIST -> Continue (docs/uipath_flows.md)."""
 
 
-# status bar texts that mean "skip this row" (UiPath create_routing_*, inactive_routing, production_version_main)
-SKIP_TEXT = re.compile(r"MATERIAL STATUS|\bE3\b|NOT EXIST", re.IGNORECASE)
+# status bar texts that mean "skip this row" (UiPath create_routing_*, inactive_routing, production_version_main).
+# E3 is normally skipped while planning already (pipelines/run.SKIP_MATERIAL_STATUSES); this is the safety net.
+# Other material status messages (S1, S2) are not a skip: a warning gets an extra Enter (pass_warnings).
+SKIP_TEXT = re.compile(r"\bE3\b|NOT EXIST", re.IGNORECASE)
 WARNING_ENTERS = 2                      # UiPath sends an extra Enter after the initial screen
 
 

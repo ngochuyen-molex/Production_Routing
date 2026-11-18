@@ -1,6 +1,7 @@
 """The interface every step follows, and the shared resources of one run."""
 from routing.core.config import PLANT
 from routing.core.db import snowflake_conn
+from routing.data import material as material_data
 from routing.resolve import routings as routing_resolve
 
 
@@ -11,7 +12,7 @@ class Context:
         self.plant, self.dry_run, self.slow = plant, dry_run, slow
         self._sf, self._sap = sf, sap
         self._owns_sf = sf is None
-        self._routings, self._versions, self._alt_boms = {}, {}, {}
+        self._routings, self._versions, self._alt_boms, self._status = {}, {}, {}, {}
 
     @property
     def sf(self):
@@ -50,6 +51,19 @@ class Context:
         if material not in self._alt_boms:
             self._alt_boms.update(routing_resolve.load_alt_boms(self.sf, [material], self.plant))
         return self._alt_boms[material]
+
+    def load_material_status(self, materials):
+        """Plant material status (MARC.MMSTA) of these materials in one query (planner)."""
+        missing = [m for m in dict.fromkeys(materials) if m not in self._status]
+        if missing:
+            df = material_data.material_status(self.sf, missing, self.plant)
+            self._status.update(dict(zip(df["MATERIAL"].astype(str), df["MATERIAL_STATUS"].fillna(""))))
+            self._status.update({m: "" for m in missing if m not in self._status})
+
+    def material_status(self, material):
+        """'E3', 'S1', ... or '' (no status)."""
+        self.load_material_status([material])
+        return self._status[material]
 
     def close(self):
         if self._owns_sf and self._sf is not None:
