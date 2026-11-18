@@ -7,6 +7,7 @@ from routing.model.enums import Dept
 from routing.model.enums import OperationRole as Role
 
 ROUTING_TEXT_LIMIT = 40                 # PLKO-KTEXT length
+DESCRIPTION_SEPARATOR = " - "
 
 FORMULAS = {                            # formula name -> value from (request, params)
     CAPACITY: lambda req, p: p.capacity,
@@ -43,9 +44,12 @@ def layout_for(request):
 
 
 def description(layout, request):
-    """Routing description; ValueError when longer than SAP allows."""
-    text = layout.description.format(resource=request.resource, material=request.material,
-                                     tool=request.tool, sorting=request.params.sorting)
+    """Routing description: the layout's parts joined with ' - ', blank parts (no tool, no
+    sorting) left out, so 'PM2-A - 5052760989' and never 'PM2-A - 5052760989 - '.
+    ValueError when longer than SAP allows."""
+    values = {"resource": request.resource, "material": request.material, "tool": request.tool,
+              "sorting": getattr(request.params, "sorting", "")}
+    text = DESCRIPTION_SEPARATOR.join(values[p] for p in layout.description if values[p])
     if len(text) > ROUTING_TEXT_LIMIT:
         raise ValueError(f"Routing description longer than {ROUTING_TEXT_LIMIT}: '{text}'")
     return text
@@ -95,5 +99,5 @@ def check_copy_source(layout, routing):
     if not layout.slot(Role.SORTING) and has_sorting:
         warnings.append(f"{name} has a YMHI sorting operation, layout {layout.id} expects none")
     if layout.slot(Role.FINAL) and routing.operation(Role.FINAL) is None:
-        warnings.append(f"{name} has no final step (PP94 / ZP04)")
+        warnings.append(f"{name} has no final step (PP94)")
     return warnings

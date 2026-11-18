@@ -23,17 +23,20 @@ GROUP_POPUP_COUNTER_COL = 1
 GROUP_POPUP_DESC_COL = 2
 
 # CA01 copy dialog
+TITLE_SELECT_TYPE = "Select Type"                       # popup title as in the UiPath scope
 COPY_SELECT_TYPE_CONTINUE = "wnd[1]/tbar[0]/btn[0]"     # "Select Type" popup
 COPY_MATERIAL = "wnd[1]/usr/ctxt[0]"                    # "Select Object to be Copied"
 COPY_PLANT = "wnd[1]/usr/ctxt[1]"
 COPY_LIST_TABLE = "wnd[1]/usr/tblSAPLCPSLTCTRL_2120"    # routings to copy from
-COPY_LIST_GROUP_COL = 0                 # VERIFY: assumed same columns as the 2110 popup
-COPY_LIST_COUNTER_COL = 1               # VERIFY
+COPY_LIST_GROUP_COL = 0                 # VERIFY: UiPath only checks cell [0,0] = a group ('MD55917')
+COPY_LIST_COUNTER_COL = 1               # VERIFY: not in UiPath (it reads by header name); record it
 COPY_LIST_DESC_COL = 2                  # UiPath double-clicks col 2
 
 # "Choose Alternative BOM" popup: list, element txt[row, column position]; from SAP_automation
 BOM_POPUP = "wnd[1]/usr/sub/1"
-BOM_POPUP_ALT_COL = 19                  # AltBOM
+BOM_POPUP_ALT_COL = 19                  # AltBOM; VERIFY: from SAP_automation, UiPath double-clicks col 8
+BOM_POPUP_USAGE_COL = 0                 # BOM usage, UiPath main_bom_assignment reads txt[1,0]
+PRODUCTION_BOM_USAGE = "1"              # usage 2 -> UiPath "check bom again"
 
 # CA01 Header Data Check / Header Details
 HEADER_DESCRIPTION = "wnd[0]/usr/sub/2/txt[1]"
@@ -90,7 +93,7 @@ MM02_PROD_VERSIONS = "wnd[0]/usr/sub/6/btn"
 VERSION_TABLE = "wnd[1]/usr/tblSAPLMDIAT_MKAL_NEW"
 VERSION_COL = 0
 VERSION_NEW_DETAILS = "wnd[1]/tbar[0]/btn[7]"
-VERSION_DELETE = "wnd[1]/tbar[0]/btn[14]"               # VERIFY: from UiPath only
+VERSION_DELETE = "wnd[1]/tbar[0]/btn[14]"               # confirmed in 4 UiPath flows, no confirmation popup
 PV_VERSION = "wnd[2]/usr/ctxt[0]"
 PV_TEXT = "wnd[2]/usr/txt[0]"
 PV_VALID_FROM = "wnd[2]/usr/ctxt[1]"
@@ -101,6 +104,6 @@ PV_COUNTER = "wnd[2]/usr/txt[4]"
 PV_ALT_BOM = "wnd[2]/usr/ctxt[6]"
 PV_BOM_USAGE = "wnd[2]/usr/ctxt[7]"
 PV_CHECK = "wnd[2]/usr/btn"
-PV_CANCEL_CHECK = "wnd[2]/tbar[0]/btn[12]"
+PV_CANCEL_CHECK = "wnd[2]/tbar[0]/btn[12]"   # VERIFY: SAP_automation recording; UiPath scope is ambiguous (wnd[2] or wnd[3])
 PV_DATE_FORMAT = "%Y/%m/%d"
 PV_VALID_TO_VALUE = "9999/12/31"

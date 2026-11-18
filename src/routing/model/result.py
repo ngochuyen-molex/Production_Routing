@@ -21,7 +21,7 @@ class StepResult:
         return cls(Status.FAILED, message)
 
     def cell(self):
-        """Text written to the RESULT_<step> column, e.g. 'Done: M5013300/35'."""
+        """Text written to the step's result column (RESULT_ROUTING, ...), e.g. 'Done: M5013300/35'."""
         return f"{self.status.value}: {self.message}" if self.message else self.status.value
 
     @classmethod

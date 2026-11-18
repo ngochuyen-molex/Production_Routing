@@ -2,6 +2,7 @@
 
 Connection code from SAP_automation/change_bom/connect.py (get_session, SlowSAP).
 """
+import re
 import subprocess
 import time
 
@@ -18,6 +19,16 @@ class SapError(RuntimeError):
 
 class SapConnectionError(SapError):
     pass
+
+
+class SapSkip(SapError):
+    """SAP refuses the material (status E3, does not exist): the row is skipped, not failed.
+    UiPath: status bar contains MATERIAL STATUS / E3 / NOT EXIST -> Continue (docs/uipath_flows.md)."""
+
+
+# status bar texts that mean "skip this row" (UiPath create_routing_*, inactive_routing, production_version_main)
+SKIP_TEXT = re.compile(r"MATERIAL STATUS|\bE3\b|NOT EXIST", re.IGNORECASE)
+WARNING_ENTERS = 2                      # UiPath sends an extra Enter after the initial screen
 
 
 class SlowSAP:
@@ -138,6 +149,24 @@ class SapSession:
         kind, text = self.status()
         if kind in ("E", "A"):
             raise SapError(f"{what}: {text}")
+
+    def pass_warnings(self, what):
+        """After an Enter: a warning (W) in the status bar needs one more Enter (UiPath sends a
+        second Enter in CA01 / CA02); at most WARNING_ENTERS times. Errors -> SapError."""
+        for _ in range(WARNING_ENTERS):
+            if self.status()[0] != "W":
+                break
+            self.enter()
+        self.raise_on_error(what)
+
+    def check_initial(self, what):
+        """First screen of CA01 / CA02 / MM02: skip texts -> SapSkip, then pass_warnings."""
+        kind, text = self.status()
+        if SKIP_TEXT.search(text):
+            raise SapSkip(f"{what}: {text}")
+        self.pass_warnings(what)
+        if SKIP_TEXT.search(self.status()[1]):
+            raise SapSkip(f"{what}: {self.status()[1]}")
 
     def window_title(self, window=0):
         return str(self.find(f"wnd[{window}]").text).strip() if self.has_window(window) else ""

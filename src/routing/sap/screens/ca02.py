@@ -20,7 +20,7 @@ def open_routing(sap, key, group_size, plant=PLANT):
     sap.set_text(el.INIT_MATERIAL, key.material)
     sap.set_text(el.INIT_PLANT, plant)
     sap.enter()
-    sap.raise_on_error(f"CA02 {key.material}")
+    sap.check_initial(f"CA02 {key.material}")
 
     if sap.exists(el.GROUP_POPUP_TABLE):
         row = table.find_row(sap, el.GROUP_POPUP_TABLE,

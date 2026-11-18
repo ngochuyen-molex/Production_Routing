@@ -7,6 +7,7 @@ from routing.model.result import StepResult
 from routing.model.row_state import InvalidRow, RowState
 from routing.pipelines import recipes as recipe_book
 from routing.pipelines.workbook import RequestWorkbook
+from routing.sap.session import SapSkip
 from routing.steps.base import Context
 
 
@@ -16,13 +17,15 @@ class RunSummary:
     planned: int = 0
     invalid: int = 0
     counts: dict = field(default_factory=dict)          # "Done" / "Skipped" / "Failed" / "Not run" -> n
+    aborted: str = ""                                   # why the run stopped early ('' = it did not)
 
     def add(self, status):
         self.counts[status] = self.counts.get(status, 0) + 1
 
     def __str__(self):
         parts = ", ".join(f"{k}: {v}" for k, v in sorted(self.counts.items())) or "no steps run"
-        return f"{self.planned} rows planned, {self.invalid} invalid. Steps - {parts}. Saved to: {self.path}"
+        text = f"{self.planned} rows planned, {self.invalid} invalid. Steps - {parts}. Saved to: {self.path}"
+        return f"RUN STOPPED - {self.aborted}\n{text}" if self.aborted else text
 
 
 def parse_rows(rows, only=None, row_numbers=None):
@@ -57,16 +60,32 @@ def plan_rows(states, ctx, phases=PHASES, recipes=recipe_book.RECIPES):
                 row.plan.errors[step.name] = f"planning failed: {error}"
 
 
+class RunAborted(RuntimeError):
+    """SAP could not be brought back to a clean screen: every next row would fail or type into the
+    wrong screen, so the run stops (results so far are saved; rerun continues from there)."""
+
+
+def _reset(ctx):
+    """Leave SAP without saving so the next row starts clean; '' or the reason it failed."""
+    try:
+        ctx.sap.reset()
+        return ""
+    except Exception as error:
+        ctx.sap_lost = str(error) or type(error).__name__
+        return f" (SAP reset failed: {ctx.sap_lost})"
+
+
 def safe_run(step, row, ctx):
+    """Run one step; any error -> SAP reset (/n, popups closed) -> Failed, and the run goes on with
+    the next row. Only when the reset itself fails is the run stopped (RunAborted in execute)."""
     try:
         return step.run(row, ctx)
+    except SapSkip as skip:                     # material refused by SAP (E3 / not exist): skip as UiPath did
+        return StepResult.skipped(str(skip) + _reset(ctx))
     except Exception as error:
         message = str(error) or type(error).__name__
         if ctx._sap is not None:
-            try:
-                ctx.sap.reset()                 # leave SAP without saving, next row starts clean
-            except Exception as reset_error:
-                message += f" (SAP reset failed: {reset_error})"
+            message += _reset(ctx)
         return StepResult.failed(message)
 
 
@@ -97,6 +116,9 @@ def execute(states, book, ctx, summary, phases=PHASES, recipes=recipe_book.RECIP
                 changed = True
             if changed:
                 book.save()                     # after every row
+            if getattr(ctx, "sap_lost", ""):
+                raise RunAborted(f"stopped after row {row.request.excel_row}: SAP could not be reset "
+                                 f"({ctx.sap_lost}); check SAP, then run again (finished steps are kept)")
 
 
 def run(path, phases=PHASES, only=None, rows=None, dry_run=False, slow=False, sheet=None,
@@ -115,7 +137,10 @@ def run(path, phases=PHASES, only=None, rows=None, dry_run=False, slow=False, sh
         plan_rows(states, ctx, phases, recipes)
         book.write_plan(states, invalid)
         if not dry_run:
-            execute(states, book, ctx, summary, phases, recipes)
+            try:
+                execute(states, book, ctx, summary, phases, recipes)
+            except RunAborted as stop:
+                summary.aborted = str(stop)
         summary.path = str(book.save())
     finally:
         if own_ctx:

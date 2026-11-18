@@ -62,6 +62,14 @@ class DeleteParams:
 
 
 @dataclass(frozen=True)
+class AssignParams:
+    """Assign Components to an existing routing; sorting also helps to find the routing."""
+    sorting: str = ""
+    alt_bom: AltBomChoice = AltBomChoice(number=1)
+    assign_components: bool = True
+
+
+@dataclass(frozen=True)
 class Request:
     excel_row: int                      # sheet row number (header = 1), e.g. 2 for the first data row
     action: Action
@@ -71,7 +79,7 @@ class Request:
     tool: str = ""
     key: RoutingKey | None = None       # group / group counter given in the file
     copy_from: RoutingKey | None = None # Create: COPY_FROM_GROUP / COPY_FROM_GC override in the file
-    params: CreateParams | DeleteParams | None = None
+    params: CreateParams | DeleteParams | AssignParams | None = None
 
 
 # ============================================================
@@ -120,7 +128,13 @@ def read_delete_params(values):
     return DeleteParams()
 
 
-PARAM_READERS = {Action.CREATE: read_create_params, Action.DELETE: read_delete_params}
+def read_assign_params(values):
+    return AssignParams(sorting=clean_tool(values.get("Sorting/ Lubricant")),
+                        alt_bom=AltBomChoice.parse(values.get("Alt Bom")))
+
+
+PARAM_READERS = {Action.CREATE: read_create_params, Action.DELETE: read_delete_params,
+                 Action.ASSIGN: read_assign_params}
 
 
 def request_from_row(excel_row, values):

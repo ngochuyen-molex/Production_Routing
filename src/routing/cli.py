@@ -86,7 +86,7 @@ def build_parser():
     pre.add_argument("file", nargs="?")
     pre.add_argument("-o", "--output")
 
-    run = sub.add_parser("run", help="plan + run routing requests in SAP (Action column: Create / Delete)")
+    run = sub.add_parser("run", help="plan + run routing requests in SAP (Action column: Add / Delete / Assign Components)")
     run.add_argument("file", nargs="?")
     run.add_argument("--phase", action="append", choices=PHASES,
                      help="only these phases (repeatable); default: all, always in phase order")

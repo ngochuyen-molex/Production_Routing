@@ -63,7 +63,7 @@ class Context:
 
 
 class Step:
-    name = ""           # also the result column: RESULT_<name>
+    name = ""           # result column: pipelines/workbook.RESULT_COLUMNS (e.g. RESULT_ROUTING)
     phase = ""          # "routing" | "components" | "pv" | "opc"
 
     def applies(self, row):

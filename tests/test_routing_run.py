@@ -196,7 +196,7 @@ def test_execute_resumes_and_blocks_after_failure(tmp_path):
     assert (first.calls, second.calls) == (2, 0)                    # failed routing -> pv not run
     sheet = load_workbook(path).active
     header = [c.value for c in sheet[1]]
-    assert sheet.cell(2, header.index("RESULT_First") + 1).value == "Failed: SAP popup"
+    assert sheet.cell(2, header.index("RESULT_FIRST") + 1).value == "Failed: SAP popup"
 
     first.outcome = StepResult.done("created")
     runner.run(path, ctx=FakeContext({}), recipes=book_recipes)    # rerun retries the failed step
@@ -206,12 +206,20 @@ def test_execute_resumes_and_blocks_after_failure(tmp_path):
     assert list(load_workbook(path)["Run log"].iter_rows(min_row=2, max_row=2, values_only=True))[0][3] == "First"
 
 
-def test_legacy_uipath_progress_counts_as_done(tmp_path):
+def test_old_uipath_progress_is_ignored_and_results_use_short_columns(tmp_path):
     path = tmp_path / "requests.xlsx"
-    write_book(path, [create_row(progress="done ca01")])
-    step = RecordingStep("CreateRouting", "routing", StepResult.done("x"))
-    runner.run(path, ctx=FakeContext({}), recipes={Action.CREATE: [step]})
-    assert step.calls == 0
+    write_book(path, [create_row(progress="done mm02")])            # UiPath value: not read
+    routing_step = RecordingStep("CreateRouting", "routing", StepResult.done("M0527609/20"))
+    comp_step = RecordingStep("AllocateComponents", "components", StepResult.done("B1 0020: 3"))
+    pv_step = RecordingStep("CreateProductionVersion", "pv", StepResult.skipped("versions exist"))
+    runner.run(path, ctx=FakeContext({}), recipes={Action.CREATE: [routing_step, comp_step, pv_step]})
+    assert (routing_step.calls, comp_step.calls, pv_step.calls) == (1, 1, 1)
+    sheet = load_workbook(path).active
+    header = [c.value for c in sheet[1]]
+    assert [sheet.cell(2, header.index(c) + 1).value for c in ("RESULT_ROUTING", "RESULT_COMPALLOC", "RESULT_MM02")] \
+        == ["Done: M0527609/20", "Done: B1 0020: 3", "Skipped: versions exist"]
+    runner.run(path, ctx=FakeContext({}), recipes={Action.CREATE: [routing_step, comp_step, pv_step]})
+    assert (routing_step.calls, comp_step.calls, pv_step.calls) == (1, 1, 1)        # rerun: nothing repeated
 
 
 # ---------------------------------------------------------------- SAP screens with a fake session
@@ -265,6 +273,44 @@ def test_inactivate_routing_opens_by_counter_and_sets_flag():
     assert ("vkey", 2, f"{list_table}/txt[1,1]") in fake.actions                 # double-click row of GrC 13
     assert fake.elements[el.HEADER_DELETION_FLAG].selected and fake.elements[el.HEADER_STATUS].text == "1"
     assert ("press", el.BTN_SAVE) in fake.actions
+
+
+def status_sap(kind, text):
+    from routing.sap import elements as el
+    from routing.sap.session import SapSession
+    fake = FakeSap({"wnd[0]": "", el.STATUS_BAR: text})
+    fake.elements[el.STATUS_BAR].MessageType = kind
+    return fake, SapSession(fake)
+
+
+def test_initial_screen_skips_material_status_like_uipath():
+    from routing.sap.session import SapError, SapSkip
+    for text in ("Material 5013300800 has status E3", "Material does not exist",
+                 "Material status 'Blocked' is set"):
+        with pytest.raises(SapSkip):
+            status_sap("W", text)[1].check_initial("CA02 x")
+    with pytest.raises(SapError):
+        status_sap("E", "Group ME31 locked by user")[1].check_initial("CA02 x")    # E3 only as a word
+
+
+def test_initial_screen_warning_gets_extra_enter():
+    fake, sap = status_sap("W", "Routing has dependent objects")
+    sap.check_initial("CA02 x")                                     # warning: no error raised
+    assert [a for a in fake.actions if a[0] == "vkey"] == [("vkey", 0, None)] * 2
+
+
+def test_sap_skip_is_skipped_not_failed():
+    from routing.sap.session import SapSkip
+
+    class Refused:
+        name, phase = "CreateRouting", "routing"
+
+        def run(self, row, ctx):
+            raise SapSkip("CA01 x: material has status E3")
+
+    ctx = FakeContext({}, sap=type("S", (), {"reset": lambda self: None})())
+    result = runner.safe_run(Refused(), None, ctx)
+    assert result.status is Status.SKIPPED and "E3" in result.message
 
 
 def test_recipes_skip_phases_not_requested():
@@ -356,3 +402,239 @@ def test_component_rule_from_sap_automation():
 def test_version_text_drops_material_when_too_long():
     routing = Routing(RoutingKey("5019400308", "M", "1"), "MF15-13 - 5019400308 - L501940E 03 #03")
     assert ProductionVersion.text_for(routing, 2) == "MF15-13 - L501940E 03 #03 B2"
+
+
+# ---------------------------------------------------------------- UiPath main_bom_assignment
+def plan_steps(values, ctx):
+    row = runner.RowState(request=request_from_row(2, values))
+    for step in recipes.steps_for(row):
+        row.plan.steps.append(step.name)
+        step.plan(row, ctx)
+    return row
+
+
+def test_assign_components_action_on_existing_routing():
+    ctx = FakeContext({MAT: [routing("13", "MN15-14 - L505276B - YMHI-1", MOLD_LUBE),
+                             routing("15", "MF15-17 - L505276A", MOLD), routing("16", "MF15-17 - L505276C", MOLD)]},
+                      alt_boms={MAT: [1, 2]})
+    assign = {"Action": "Assign Components", "Dept": "MD", "Material": MAT, "Resource": "MN15-14",
+              "Tool": "L505276B", "Alt Bom": "ALL BOM"}
+    row = plan_steps(assign, ctx)
+    assert row.plan.steps == ["AllocateComponents"]
+    assert str(row.key) == "M0527609/13" and row.plan.component_alt_boms == [1, 2]
+
+    ambiguous = plan_steps(dict(assign, Resource="MF15-17", Tool=""), ctx)
+    assert ambiguous.plan.skip["AllocateComponents"].startswith("2 routings match")
+    missing = plan_steps(dict(assign, Tool="L505276X"), ctx)
+    assert missing.plan.skip["AllocateComponents"] == "routing not found"
+
+
+# ---------------------------------------------------------------- CA01 / CA02 popup branches
+def copy_sap(**windows):
+    """Fake SAP after CA01 'Copy from'. windows: select_type / select_object / copy_list (rows)."""
+    from routing.sap import elements as el
+    texts = {"wnd[0]": "", el.STATUS_BAR: ""}
+    if windows.get("select_type"):
+        texts.update({"wnd[1]": el.TITLE_SELECT_TYPE, el.COPY_SELECT_TYPE_CONTINUE: ""})
+    if windows.get("select_object"):
+        texts.update({"wnd[1]": "Create Using Copy Function: Select Object to be Copied",
+                      el.COPY_MATERIAL: "", el.COPY_PLANT: "", f"wnd[1]/{el.BTN_ENTER}": ""})
+    rows = windows.get("copy_list")
+    if rows:
+        texts.setdefault("wnd[1]", "Entry Option: Group")
+        texts[el.COPY_LIST_TABLE] = ""
+        for r, (group, counter) in enumerate(rows):
+            texts[f"{el.COPY_LIST_TABLE}/txt[0,{r}]"] = group
+            texts[f"{el.COPY_LIST_TABLE}/txt[1,{r}]"] = counter
+            texts[f"{el.COPY_LIST_TABLE}/txt[2,{r}]"] = "desc"
+    fake = FakeSap(texts)
+    if rows:
+        table = fake.elements[el.COPY_LIST_TABLE]
+        table.RowCount, table.VisibleRowCount = len(rows), 10
+        table.VerticalScrollbar = type("Bar", (), {"Position": 0})()
+    return fake
+
+
+def test_ca01_copy_dialog_all_popups():
+    from routing.sap import elements as el
+    from routing.sap.screens import ca01
+    from routing.sap.session import SapSession
+    fake = copy_sap(select_type=True, select_object=True, copy_list=[("M0527609", "12"), ("", "13"), ("", "15")])
+    source = RoutingKey(MAT, "M0527609", "13")
+    assert ca01.choose_copy_source(SapSession(fake), source, 3) == ""
+    assert ("press", el.COPY_SELECT_TYPE_CONTINUE) in fake.actions
+    assert fake.elements[el.COPY_MATERIAL].text == MAT
+    assert ("vkey", 2, f"{el.COPY_LIST_TABLE}/txt[2,1]") in fake.actions        # group carried to row 1
+
+
+def test_ca01_copy_dialog_only_list_and_none():
+    from routing.sap import elements as el
+    from routing.sap.screens import ca01
+    from routing.sap.session import SapError, SapSession
+    source = RoutingKey(MAT, "M0527609", "13")
+    fake = copy_sap(copy_list=[("M0527609", "13")])                              # no Select Type / Object
+    assert ca01.choose_copy_source(SapSession(fake), source, 1) == ""
+    assert not any(a[0] == "press" for a in fake.actions)
+    # nothing shown: SAP copied the only routing itself -> fine with 1 routing, error with more
+    assert ca01.choose_copy_source(SapSession(copy_sap()), source, 1) == "single routing, copied by SAP without list"
+    with pytest.raises(SapError, match="has 2 routings"):
+        ca01.choose_copy_source(SapSession(copy_sap()), source, 2)
+
+
+def test_ca02_without_group_popup_or_header_list():
+    from routing.sap import elements as el
+    from routing.sap.screens import ca02
+    from routing.sap.session import SapError, SapSession
+    texts = {"wnd[0]": "", el.OKCODE: "", el.STATUS_BAR: "", el.INIT_MATERIAL: "", el.INIT_PLANT: ""}
+    key = RoutingKey(MAT, "M0527609", "13")
+    assert ca02.open_routing(SapSession(FakeSap(texts)), key, 1) == "single routing in group"
+    with pytest.raises(SapError, match="has 2 routings"):
+        ca02.open_routing(SapSession(FakeSap(texts)), key, 2)
+
+
+# ---------------------------------------------------------------- blank optional values per department
+@pytest.mark.parametrize("dept, extra, expected", [
+    ("PLT", {"Resource": "PM2-A", "Tool": None}, "PM2-A - 5052760989"),            # plating, no tool
+    ("PLT", {"Resource": "PM2-A", "Tool": "0"}, "PM2-A - 5052760989"),             # UiPath "0" = no tool
+    ("PLT", {"Resource": "PM2-A", "Tool": "L505276P"}, "PM2-A - 5052760989 - L505276P"),
+    ("AS", {"Resource": "AS-01", "Tool": None}, "AS-01 - 5052760989"),
+    ("AS", {"Resource": "AS-01", "Tool": "NULL"}, "AS-01 - 5052760989"),
+    ("MD", {"Sorting/ Lubricant": None}, "MN15-20 - 5052760989 - L505276B"),      # mold without sorting
+    ("MD", {"Sorting/ Lubricant": float("nan")}, "MN15-20 - 5052760989 - L505276B"),
+    ("MD", {"Sorting/ Lubricant": "YMHI-1", "Sorting/ Lubricant Capacity": 100000},
+     "MN15-20 - L505276B - YMHI-1"),
+])
+def test_blank_tool_or_sorting_never_breaks_names(dept, extra, expected):
+    request = request_from_row(2, create_row(Dept=dept, **extra))
+    layout = layouts.layout_for(request)
+    text = layouts.description(layout, request)
+    assert text == expected and not text.endswith("-") and "None" not in text and "nan" not in text
+    assert ProductionVersion.text_for(Routing(RoutingKey(MAT, "G", "1"), text), 1) == f"{expected} B1"
+
+
+def test_blank_values_needed_by_the_layout_skip_the_row_not_the_run():
+    # mold / stamping need a tool and cavity: the row is skipped with a reason, nothing crashes
+    row = plan_steps(create_row(Tool=None, **{"Tool Cavity": None}), FakeContext({MAT: [routing("15", "x", MOLD)]}))
+    assert row.plan.skip["CreateRouting"] == "missing Tool, Tool Cavity for layout MD"
+    # sorting given without its capacity: the row is invalid, the message says which column
+    with pytest.raises(InputError, match="Sorting/ Lubricant Capacity missing"):
+        request_from_row(2, create_row(**{"Sorting/ Lubricant": "YMHI-1"}))
+
+
+# ---------------------------------------------------------------- copy source: sorting shape
+def test_copy_source_sorting_shape_comes_from_operations_not_name():
+    lube = routing("13", "MN15-14 - L505276B", MOLD_LUBE)                     # YMHI-1 op, name without YMHI
+    named_only = routing("14", "MN15-14 - L505276B - YMHI-1", MOLD)           # YMHI in name, no YMHI op
+    plain = routing("15", "MF15-17 - L505276A", MOLD)
+    trial = routing("16", "MDTRIAL YMHI-1", MOLD_LUBE)                        # never copied
+    ctx = FakeContext({MAT: [lube, named_only, plain, trial]})
+    sorting = {"Sorting/ Lubricant": "YMHI-1", "Sorting/ Lubricant Capacity": 100000}
+
+    assert plan_steps(create_row(**sorting), ctx).plan.copy_from.key.counter == "13"    # by the operation
+    assert plan_steps(create_row(), ctx).plan.copy_from.key.counter == "15"            # newest without YMHI op
+    # override with the wrong shape is refused, not just warned
+    wrong = plan_steps(create_row(COPY_FROM_GROUP="M0527609", COPY_FROM_GC="15", **sorting), ctx)
+    assert wrong.plan.skip["CreateRouting"] == "COPY_FROM M0527609/15 must be a routing with a YMHI sorting step"
+    # no routing with a sorting step at all -> skip with the reason
+    none = plan_steps(create_row(**sorting), FakeContext({MAT: [plain, named_only]}))
+    assert "with a YMHI sorting step" in none.plan.skip["CreateRouting"]
+
+
+def test_copy_source_prefers_same_sorting_work_center():
+    ymhi4 = [("0005", "PP07", "TMC"), ("0010", "PPQM", "XQA"), ("0020", "PP01", "MN15-14"),
+             ("0030", "PP96", "YMHI-4"), ("0040", "PP94", "OMINS")]
+    routings = MaterialRoutings(MAT, (routing("13", "a", MOLD_LUBE), routing("17", "b", ymhi4)))
+    assert routings.copy_source(lambda r: True, needs_sorting=True, sorting="YMHI-1").key.counter == "13"
+    assert routings.copy_source(lambda r: True, needs_sorting=True, sorting="YMHI-4").key.counter == "17"
+
+
+# ---------------------------------------------------------------- BOM allocation (as SAP_automation)
+def test_bom_allocation_all_bom_two_passes_per_alt_bom(monkeypatch):
+    from routing.steps import components as step_module
+    calls, table = [], {}
+
+    def open_routing(sap, key, size, plant):
+        calls.append(("open", str(key)))
+        return ""
+
+    def open_allocation(sap, alt_bom, count):
+        calls.append(("bom", alt_bom))
+        table.clear()
+        table.update({0: ("CARTON BOX", ""), 1: ("RESIN", ""), 2: ("Lubricant oil", ""), 3: ("PIN", "0020")})
+        return None
+
+    def unassigned(sap):
+        return [(r, d) for r, (d, op) in table.items() if not op], ""
+
+    def assign(sap, rows, operation):
+        calls.append(("assign", operation, tuple(rows)))
+        for r in rows:
+            table[r] = (table[r][0], operation)
+
+    monkeypatch.setattr(step_module.ca02, "open_routing", open_routing)
+    monkeypatch.setattr(step_module.ca02, "save", lambda sap, what: calls.append(("save", what)) or "")
+    monkeypatch.setattr(step_module.components, "open_allocation", open_allocation)
+    monkeypatch.setattr(step_module.components, "unassigned_components", unassigned)
+    monkeypatch.setattr(step_module.components, "assign", assign)
+
+    lube = routing("13", "MN15-14 - L505276B - YMHI-1", MOLD_LUBE)
+    ctx = FakeContext({MAT: [lube]}, sap=object(), alt_boms={MAT: [1, 3]})          # active: 1 and 3 (2 gone)
+    row = plan_steps({"Action": "Assign Components", "Dept": "MD", "Material": MAT, "Resource": "MN15-14",
+                      "Tool": "L505276B", "Alt Bom": "ALL BOM"}, ctx)
+    assert row.plan.component_alt_boms == [1, 3]                  # every active alt BOM, by number
+    result = step_module.AllocateComponents().run(row, ctx)
+
+    per_bom = [("open", "M0527609/13"), ("bom", None), ("assign", "0030", (0, 2)), ("assign", "0020", (1,)),
+               ("save", None)]
+    assert [c[0] for c in calls] == [c[0] for c in per_bom] * 2
+    assert [c[1] for c in calls if c[0] == "bom"] == [1, 3]
+    assert ("assign", "0030", (0, 2)) in calls and ("assign", "0020", (1,)) in calls   # PIN kept (already 0020)
+    assert result.status is Status.DONE and result.message == "B1 0030: 2, 0020: 1; B3 0030: 2, 0020: 1"
+
+    one = plan_steps({"Action": "Assign Components", "Dept": "MD", "Material": MAT, "Resource": "MN15-14",
+                      "Tool": "L505276B", "Alt Bom": 3}, ctx)
+    assert one.plan.component_alt_boms == [3]                     # a number = only that alt BOM
+    gone = plan_steps({"Action": "Assign Components", "Dept": "MD", "Material": MAT, "Resource": "MN15-14",
+                       "Tool": "L505276B", "Alt Bom": 2}, ctx)
+    assert gone.plan.skip["AllocateComponents"] == "alt BOM 2 not active (active: 1, 3)"
+
+
+# ---------------------------------------------------------------- UiPath defects fixed
+def test_failed_row_resets_sap_and_run_continues_but_stops_when_reset_fails(tmp_path):
+    path = tmp_path / "requests.xlsx"
+    write_book(path, [create_row(), create_row(Resource="MN15-30"), create_row(Resource="MN15-31")])
+
+    class Boom(RecordingStep):
+        def run(self, row, ctx):
+            self.calls += 1
+            raise RuntimeError("unexpected popup 'Information'")
+
+    class Sap:
+        resets, fail = 0, False
+
+        def reset(self):
+            Sap.resets += 1
+            if Sap.fail:
+                raise RuntimeError("session gone")
+
+    step = Boom("CreateRouting", "routing", StepResult.done("x"))
+    ctx = FakeContext({MAT: []}, sap=Sap())
+    summary = runner.run(path, ctx=ctx, recipes={Action.CREATE: [step]})
+    assert step.calls == 3 and Sap.resets == 3 and summary.counts == {"Failed": 3} and not summary.aborted
+    sheet = load_workbook(path).active
+    assert str(sheet.cell(2, [c.value for c in sheet[1]].index("RESULT_ROUTING") + 1).value).startswith(
+        "Failed: unexpected popup")
+
+    write_book(path, [create_row(), create_row(Resource="MN15-30")])
+    Sap.fail, step.calls = True, 0
+    summary = runner.run(path, ctx=FakeContext({MAT: []}, sap=Sap()), recipes={Action.CREATE: [step]})
+    assert step.calls == 1 and summary.aborted.startswith("stopped after row 2")       # row 3 not touched
+
+
+def test_action_is_case_insensitive_and_unknown_action_does_nothing():
+    for text in ("Add", "add", " ADD ", "create", "CREATE", " Create "):   # Add = file name, Create = alias
+        assert request_from_row(2, create_row(Action=text)).action is Action.CREATE
+    assert request_from_row(2, {"Action": "assign components", "Dept": "MD", "Material": MAT,
+                                "Resource": "X"}).action is Action.ASSIGN
+    with pytest.raises(InputError, match="unknown"):
+        request_from_row(2, create_row(Action="CHANGE"))

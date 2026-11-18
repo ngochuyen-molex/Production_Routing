@@ -11,7 +11,7 @@ from routing.model.enums import OperationRole
 PRODUCTION_STATUS = "4"         # PLKO-STATU: production / released
 PRODUCTION_OPERATION = "0020"
 SORTING_PREFIX = "YMHI"
-FINAL_CONTROL_KEYS = ("PP94", "ZP04")
+FINAL_CONTROL_KEYS = ("PP94",)  # ZP04 = trial routing, never a final step
 VERSION_LIMIT = 5000            # versions >= 5000 are not counted for the next number (UiPath add_production_detail)
 VERSION_TEXT_LIMIT = 40         # MKAL-TEXT1
 
@@ -51,6 +51,16 @@ class Routing:
         return "TRIAL" in self.description.upper()         # covers MDTRIAL
 
     @property
+    def has_sorting(self):
+        """Sorting / lubricant step = an operation with a YMHI work center after 0020 (Snowflake
+        operations). Not the name: the description may say YMHI without the step, or the reverse."""
+        return self.operation(OperationRole.SORTING) is not None
+
+    def sorting_work_center(self):
+        op = self.operation(OperationRole.SORTING)
+        return op.work_center if op else ""
+
+    @property
     def can_be_copied(self):
         """Valid copy source for CA01: production status, not flagged, never a trial routing."""
         return self.status == PRODUCTION_STATUS and not self.deleted and not self.is_trial
@@ -67,7 +77,7 @@ class Routing:
 
     def operation(self, role):
         """Operation playing `role` (docs/operation_values.md): production = 0020, sorting = YMHI
-        after it, final = last PP94 / ZP04 after it. TOOL is a sub-operation, not in Snowflake: None."""
+        after it, final = last PP94 after it (ZP04 = trial, never final). TOOL is a sub-operation, not in Snowflake: None."""
         ops = sorted(self.operations, key=lambda op: op.number)
         production = next((op for op in ops if op.number == PRODUCTION_OPERATION), None)
         if role is OperationRole.PRODUCTION:
@@ -97,12 +107,16 @@ class MaterialRoutings:
     def group_size(self, group):
         return sum(1 for r in self.routings if r.key.group == group)
 
-    def copy_source(self, fits, resource="", needs_sorting=False):
-        """Best routing to copy in CA01: can_be_copied (+ a sorting step when needed), ranked by
-        fits(routing) (no layout warnings), same resource, newest counter. None if none."""
-        candidates = [r for r in self.routings if r.can_be_copied
-                      and (not needs_sorting or r.operation(OperationRole.SORTING) is not None)]
-        candidates.sort(key=lambda r: (not fits(r), resource not in r.work_centers(), -_number(r.key.counter)))
+    def copy_source(self, fits, resource="", needs_sorting=False, sorting=""):
+        """Best routing to copy in CA01, or None.
+        Must: can_be_copied (status 4, not flagged, not TRIAL) and the same sorting shape as the
+        request - a sorting step (YMHI work center after 0020, from the operations, not the name)
+        exactly when the request has a Sorting/ Lubricant; otherwise the rows shift.
+        Ranked by: fits(routing) (no layout warnings), same resource, same sorting work center, newest."""
+        candidates = [r for r in self.routings if r.can_be_copied and r.has_sorting == needs_sorting]
+        candidates.sort(key=lambda r: (not fits(r), resource not in r.work_centers(),
+                                       bool(sorting) and r.sorting_work_center() != sorting,
+                                       -_number(r.key.counter)))
         return candidates[0] if candidates else None
 
 

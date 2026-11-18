@@ -16,7 +16,7 @@ def start(sap, material, plant=PLANT):
     sap.set_text(el.INIT_MATERIAL, material)
     sap.set_text(el.INIT_PLANT, plant)
     sap.press(el.CA01_COPY_FROM)
-    sap.raise_on_error(f"CA01 {material}")
+    sap.check_initial(f"CA01 {material}")
 
 
 def choose_target_group(sap, group):
@@ -31,18 +31,28 @@ def choose_target_group(sap, group):
     sap.double_click(table.cell_id(sap, el.GROUP_POPUP_TABLE, el.GROUP_POPUP_DESC_COL, row), window=1)
 
 
-def choose_copy_source(sap, source: RoutingKey, plant=PLANT):
-    """'Select Type' -> 'Select Object to be Copied' (same material) -> copy list -> pick source by
-    group + counter (UiPath took the first status-4 row instead)."""
-    if sap.exists(el.COPY_SELECT_TYPE_CONTINUE) and not sap.exists(el.COPY_MATERIAL):
+def choose_copy_source(sap, source: RoutingKey, routing_count, plant=PLANT):
+    """Copy dialog after 'Copy from', as UiPath find_valid_routing_tocopy. Each screen may or may not
+    appear:
+      'Select Type' popup         -> Continue
+      'Select Object to be Copied' -> material + plant, Continue
+      copy list (2120)            -> pick the source by group + counter (UiPath: first status-4 row)
+      none of them                -> SAP copied the only routing of the material itself and goes on
+                                     (BOM popup / header); only accepted when the material has 1 routing
+    routing_count = routings of the material in SAP (Snowflake). Returns a note ('' normally)."""
+    if sap.window_title(1) == el.TITLE_SELECT_TYPE:
         sap.press(el.COPY_SELECT_TYPE_CONTINUE)
-    sap.set_text(el.COPY_MATERIAL, source.material)
-    sap.set_text(el.COPY_PLANT, plant)
-    sap.press(f"wnd[1]/{el.BTN_ENTER}")
-    sap.raise_on_error(f"Copy from {source}")
+    if sap.exists(el.COPY_MATERIAL):
+        sap.set_text(el.COPY_MATERIAL, source.material)
+        sap.set_text(el.COPY_PLANT, plant)
+        sap.press(f"wnd[1]/{el.BTN_ENTER}")
+        sap.raise_on_error(f"Copy from {source}")
 
     if not sap.exists(el.COPY_LIST_TABLE):
-        raise SapError(f"Copy list not shown for {source.material} ({sap.where()})")
+        if routing_count > 1:
+            raise SapError(f"Copy list not shown, but {source.material} has {routing_count} routings "
+                           f"- cannot tell which one SAP copied ({sap.where()})")
+        return "single routing, copied by SAP without list"
     current_group = {"value": ""}
 
     def is_source(r):
@@ -55,6 +65,7 @@ def choose_copy_source(sap, source: RoutingKey, plant=PLANT):
     if row is None:
         raise SapError(f"Copy source {source.group}/{source.counter} not in the copy list")
     sap.double_click(table.cell_id(sap, el.COPY_LIST_TABLE, el.COPY_LIST_DESC_COL, row), window=1)
+    return ""
 
 
 def choose_alt_bom(sap, alt_bom):
@@ -66,6 +77,11 @@ def choose_alt_bom(sap, alt_bom):
     while sap.exists(f"{el.BOM_POPUP}/txt[{row},{el.BOM_POPUP_ALT_COL}]"):
         cell = f"{el.BOM_POPUP}/txt[{row},{el.BOM_POPUP_ALT_COL}]"
         if _counter(sap.get_text(cell)) == str(alt_bom):
+            usage_cell = f"{el.BOM_POPUP}/txt[{row},{el.BOM_POPUP_USAGE_COL}]"
+            usage = sap.get_text(usage_cell) if sap.exists(usage_cell) else ""
+            if usage and usage != el.PRODUCTION_BOM_USAGE:     # UiPath main_bom_assignment: "check bom again"
+                raise SapError(f"Alt BOM {alt_bom} has BOM usage {usage}, expected "
+                               f"{el.PRODUCTION_BOM_USAGE}: check the BOM")
             sap.double_click(cell, window=1)
             return
         row += 1
@@ -74,7 +90,7 @@ def choose_alt_bom(sap, alt_bom):
 
 def fill_header(sap, description, status="4"):
     """Header Data Check: description; read the new group + counter; Header Details: status.
-    Returns RoutingKey of the new routing (material filled by the caller)."""
+    Returns (group, counter)."""
     if not sap.exists(el.HEADER_DESCRIPTION):
         raise SapError(f"Header data screen not shown ({sap.where()})")
     sap.set_text(el.HEADER_DESCRIPTION, description)
@@ -82,6 +98,7 @@ def fill_header(sap, description, status="4"):
     counter = _counter(sap.get_text(el.HEADER_COUNTER))
     sap.set_text(el.HEADER_STATUS, status)
     sap.enter()
+    sap.pass_warnings("header")                 # UiPath mold / plt / stamping: second Enter here
     return group, counter
 
 

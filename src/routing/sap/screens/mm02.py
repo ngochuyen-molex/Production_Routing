@@ -15,7 +15,7 @@ def open_versions(sap, material):
     sap.start_transaction("MM02")
     sap.set_text(el.INIT_MATERIAL, material)
     sap.enter()
-    sap.raise_on_error(f"MM02 {material}")
+    sap.check_initial(f"MM02 {material}")
     for step in ("select views", "org levels"):
         if not sap.has_window(1):
             raise SapError(f"Expected popup '{step}' not shown ({sap.where()})")
@@ -62,7 +62,8 @@ def add_version(sap, version, text, key, alt_bom, bom_usage="1"):
 
 
 def delete_version(sap, version):
-    """Select the row of `version` in the list and press Delete. VERIFY: confirmation popup."""
+    """Select the row of `version` in the list and press Delete (UiPath: no confirmation popup,
+    delete is immediate). An unexpected popup stops the step instead of being confirmed blindly."""
     row = table.find_row(sap, el.VERSION_TABLE,
                          lambda r: table.cell_text(sap, el.VERSION_TABLE, el.VERSION_COL, r) == version,
                          blank_col=el.VERSION_COL)
@@ -70,8 +71,8 @@ def delete_version(sap, version):
         raise SapError(f"Production version {version} not in the list")
     sap.find(el.VERSION_TABLE).getAbsoluteRow(int(sap.find(el.VERSION_TABLE).VerticalScrollbar.Position) + row).selected = True
     sap.press(el.VERSION_DELETE)
-    if sap.has_window(2):               # VERIFY: "delete?" confirmation
-        sap.press(f"wnd[2]/{el.BTN_ENTER}")
+    if sap.has_window(2):
+        raise SapError(f"Unexpected popup after deleting version {version}: {popup_text(sap, 2)}")
 
 
 def close_and_save(sap, what):

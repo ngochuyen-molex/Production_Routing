@@ -29,7 +29,7 @@ class OperationSlot:
 @dataclass(frozen=True)
 class OperationLayout:
     id: str
-    description: str                        # routing description template
+    description: tuple[str, ...]            # routing description parts, joined with " - "; blank parts left out
     slots: tuple[OperationSlot, ...]
     allocate_components: bool = True
     verified: bool = False
@@ -52,27 +52,27 @@ _LINE_DETAILS = (("base_qty", CAPACITY), ("cavity", "tool_cavity"),
 
 LAYOUTS = {
     "AS": OperationLayout(
-        "AS", "{resource} - {material}",
+        "AS", ("resource", "material"),
         (OperationSlot(Role.PRODUCTION, 1, RESOURCE, CAPACITY),
          OperationSlot(Role.FINAL, 2, KEEP, CAPACITY))),
     "PLT": OperationLayout(
-        "PLT", "{resource} - {material} - {tool}",
+        "PLT", ("resource", "material", "tool"),             # tool optional: plating often has none
         (OperationSlot(Role.PRODUCTION, 1, RESOURCE, CAPACITY),
          OperationSlot(Role.FINAL, 2, KEEP, CAPACITY)),
         allocate_components=False),          # plating needs a new BOM (architecture.md 4.1)
     "STP": OperationLayout(
-        "STP", "{resource} - {material} - {tool}",
+        "STP", ("resource", "material", "tool"),
         (OperationSlot(Role.PRODUCTION, 2, RESOURCE, details=_LINE_DETAILS),
          OperationSlot(Role.TOOL, 3, TOOL, details=(("op_text", WORK_CENTER_TEXT),) + _LINE_DETAILS),
          OperationSlot(Role.FINAL, 4, KEEP, CAPACITY_X_CAVITY))),
     "MD": OperationLayout(
-        "MD", "{resource} - {material} - {tool}",
+        "MD", ("resource", "material", "tool"),
         (OperationSlot(Role.PRODUCTION, 2, RESOURCE,
                        details=(("op_text", MACHINE_NAME),) + _LINE_DETAILS + (("setup", "one"),)),
          OperationSlot(Role.TOOL, 3, TOOL, details=(("op_text", WORK_CENTER_TEXT),) + _LINE_DETAILS),
          OperationSlot(Role.FINAL, 4, KEEP, CAPACITY_X_CAVITY))),
     "MD_SORTING": OperationLayout(
-        "MD_SORTING", "{resource} - {tool} - {sorting}",
+        "MD_SORTING", ("resource", "tool", "sorting"),
         (OperationSlot(Role.PRODUCTION, 2, RESOURCE,
                        details=(("op_text", MACHINE_NAME),) + _LINE_DETAILS + (("setup", "one"),)),
          OperationSlot(Role.TOOL, 3, TOOL, details=(("op_text", WORK_CENTER_TEXT),) + _LINE_DETAILS),

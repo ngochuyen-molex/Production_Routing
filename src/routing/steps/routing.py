@@ -7,7 +7,7 @@ from routing.model.result import StepResult
 from routing.sap.screens import ca01, ca02, operations
 from routing.steps.base import Step
 
-CREATE_STATUS = "4"         # production / released (python_migration.md 5)
+CREATE_STATUS = "4"         # production / released (README.md Background, decisions)
 
 
 def matching_routings(row, routings):
@@ -19,6 +19,20 @@ def matching_routings(row, routings):
         return [found] if found else []
     sorting = getattr(request.params, "sorting", "")
     return routings.matching(request.resource, request.tool, sorting)
+
+
+def single_routing(row, routings):
+    """(routing, None) when the row means exactly one routing, else (None, reason to skip).
+    Several active matches are never guessed (PLT has no tool to tell them apart)."""
+    candidates = matching_routings(row, routings)
+    active = [r for r in candidates if not r.deleted]
+    if len(active) > 1:
+        keys = ", ".join(str(r.key) for r in active)
+        return None, f"{len(active)} routings match ({keys}), fill group / group counter"
+    target = active[0] if active else (candidates[0] if candidates else None)
+    if target is None:
+        return None, "routing not found"
+    return target, None
 
 
 class CreateRouting(Step):
@@ -51,19 +65,29 @@ class CreateRouting(Step):
             plan.skip[self.name] = str(error)
             return
 
+        needs_sorting = bool(request.params.sorting)
+        shape = "with a YMHI sorting step" if needs_sorting else "without a YMHI sorting step"
         if request.copy_from:                            # the user's choice in COPY_FROM_GROUP / _GC
             source = routings.get(request.copy_from)
             if source is None or not source.can_be_copied:
                 plan.skip[self.name] = (f"COPY_FROM {request.copy_from} "
                                         + ("not found" if source is None else "is not status 4 / is flagged / is TRIAL"))
                 return
+            if source.has_sorting != needs_sorting:      # rows would shift: never copy the wrong shape
+                plan.skip[self.name] = f"COPY_FROM {request.copy_from} must be a routing {shape}"
+                return
         else:
             source = routings.copy_source(fits=lambda r: not layouts.check_copy_source(layout, r),
-                                          resource=request.resource, needs_sorting=bool(request.params.sorting))
+                                          resource=request.resource, needs_sorting=needs_sorting,
+                                          sorting=request.params.sorting)
             if source is None:
-                plan.skip[self.name] = "no routing of this material to copy from (status 4, not flagged, not TRIAL)"
+                plan.skip[self.name] = (f"no routing of this material to copy from {shape} "
+                                        "(status 4, not flagged, not TRIAL)")
                 return
         plan.copy_from = source
+        if ("YMHI" in source.description.upper()) != source.has_sorting:
+            plan.warnings.append(f"copy source {source.key}: name and operations disagree about YMHI "
+                                 f"('{source.description}'); the operations were used")
         plan.warnings.extend(layouts.check_copy_source(layout, source))
         if not layout.verified:
             plan.warnings.append(f"layout {layout.id} not verified on SAP yet")
@@ -75,9 +99,11 @@ class CreateRouting(Step):
 
         ca01.start(sap, request.material, ctx.plant)
         ca01.choose_target_group(sap, source.group)
-        ca01.choose_copy_source(sap, source, ctx.plant)
-        ca01.choose_alt_bom(sap, request.params.alt_bom.number or 1)
-        group, counter = ca01.fill_header(sap, layouts.description(layout, request), CREATE_STATUS)
+        note = ca01.choose_copy_source(sap, source, len(ctx.routings(request.material).routings), ctx.plant)
+        # BOM popup while copying: the row's alt BOM, for ALL BOM the first active one
+        ca01.choose_alt_bom(sap, request.params.alt_bom.number or next(iter(ctx.alt_boms(request.material)), 1))
+        text = layouts.description(layout, request)
+        group, counter = ca01.fill_header(sap, text, CREATE_STATUS)
         ca01.open_operations(sap)
 
         values = layouts.operation_values(layout, request)
@@ -98,8 +124,9 @@ class CreateRouting(Step):
         message = ca02.save(sap, f"routing {group}/{counter}")
         row.key = RoutingKey(request.material, group, counter)
         # not in Snowflake yet: later phases (components, pv) use this in-memory routing
-        row.plan.target = Routing(row.key, layouts.description(layout, request), CREATE_STATUS)
-        return StepResult.done(f"{row.key} copied from {source}. {message}".strip())
+        row.plan.target = Routing(row.key, text, CREATE_STATUS)
+        text_done = f"{row.key} copied from {source}" + (f" ({note})" if note else "")
+        return StepResult.done(f"{text_done}. {message}" if message else text_done)
 
 
 class InactivateRouting(Step):
@@ -110,16 +137,9 @@ class InactivateRouting(Step):
         return row.request.action is Action.DELETE
 
     def plan(self, row, ctx):
-        candidates = matching_routings(row, ctx.routings(row.request.material))
-        active = [r for r in candidates if not r.deleted]
-        if len(active) > 1:
-            # e.g. PLT has no tool to tell routings apart: never guess which one to delete
-            keys = ", ".join(str(r.key) for r in active)
-            row.plan.skip[self.name] = f"{len(active)} routings match ({keys}), fill group / group counter"
-            return
-        target = active[0] if active else (candidates[0] if candidates else None)
+        target, reason = single_routing(row, ctx.routings(row.request.material))
         if target is None:
-            row.plan.skip[self.name] = "routing not found"
+            row.plan.skip[self.name] = reason
             return
         row.key, row.plan.target = target.key, target
         if target.deleted:

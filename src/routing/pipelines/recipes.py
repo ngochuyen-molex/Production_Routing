@@ -8,6 +8,7 @@ from routing.steps.routing import CreateRouting, InactivateRouting
 RECIPES = {
     Action.CREATE: [CreateRouting(), AllocateComponents(), CreateProductionVersion()],
     Action.DELETE: [InactivateRouting(), DeleteProductionVersion()],
+    Action.ASSIGN: [AllocateComponents()],
 }
 
 

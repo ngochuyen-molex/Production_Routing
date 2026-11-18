@@ -13,16 +13,26 @@ from routing.model.result import StepResult
 PLAN_SHEET = "Plan"
 LOG_SHEET = "Run log"
 RESULT_PREFIX = "RESULT_"
+# One result column per kind of work. A row has one Action, so Add and Delete share a column:
+#   RESULT_ROUTING   CA01 create (Add)  /  CA02 deletion flag + status 1 (Delete)
+#   RESULT_COMPALLOC CA02 component allocation (Add, Assign Components)
+#   RESULT_MM02      MM02 production versions created (Add) / deleted (Delete)
+RESULT_COLUMNS = {
+    "CreateRouting": "RESULT_ROUTING",
+    "InactivateRouting": "RESULT_ROUTING",
+    "AllocateComponents": "RESULT_COMPALLOC",
+    "CreateProductionVersion": "RESULT_MM02",
+    "DeleteProductionVersion": "RESULT_MM02",
+}
+INPUT_RESULT_COLUMN = "RESULT_INPUT"            # row could not be read (unknown Action, missing Capacity, ...)
 KEY_COLUMNS = ("group", "group counter")
 COPY_PLANNED_COLUMN = "COPY_FROM_PLANNED"       # written by the planner, information only
 # COPY_FROM_GROUP / COPY_FROM_GC are filled only by the user (override), never written here
 
-# UiPath progress values still in old files -> step done / skipped (architecture.md 7.1)
-LEGACY_PROGRESS = {
-    ("progress", "done ca01"): ("CreateRouting", StepResult.done("UiPath (progress = done ca01)")),
-    ("progress", "done ca02"): ("InactivateRouting", StepResult.done("UiPath (progress = done ca02)")),
-    ("progress", "routing not found"): ("InactivateRouting", StepResult.skipped("routing not found (UiPath)")),
-}
+
+def result_column(step_name):
+    """Column holding a step's result; steps not listed get RESULT_<STEP NAME>."""
+    return RESULT_COLUMNS.get(step_name, RESULT_PREFIX + step_name.upper())
 
 
 class WorkbookLocked(RuntimeError):
@@ -52,15 +62,12 @@ class RequestWorkbook:
         return result
 
     def previous_results(self, values, step_names):
-        """{step name: StepResult} from RESULT_<step> columns, plus old UiPath progress values."""
+        """{step name: StepResult} from the result columns (RESULT_COLUMNS). The old UiPath
+        `progress` column is not read."""
         results = {}
         for name in step_names:
-            result = StepResult.from_cell(values.get(RESULT_PREFIX + name))
+            result = StepResult.from_cell(values.get(result_column(name)))
             if result is not None:
-                results[name] = result
-        for (column, text), (name, result) in LEGACY_PROGRESS.items():
-            if name in step_names and name not in results and \
-                    str(values.get(column) or "").strip().lower() == text:
                 results[name] = result
         return results
 
@@ -76,7 +83,7 @@ class RequestWorkbook:
         self.sheet.cell(row_number, self.column(name), value)
 
     def write_result(self, row, step_name):
-        self.write(row.request.excel_row, RESULT_PREFIX + step_name, row.results[step_name].cell())
+        self.write(row.request.excel_row, result_column(step_name), row.results[step_name].cell())
         if row.key is not None:
             self.write(row.request.excel_row, KEY_COLUMNS[0], row.key.group)
             self.write(row.request.excel_row, KEY_COLUMNS[1], row.key.counter)
@@ -105,7 +112,7 @@ class RequestWorkbook:
                 self.write(r.excel_row, COPY_PLANNED_COLUMN, copy_from)
         for bad in invalid:
             sheet.append([bad.excel_row, "", "", "", "", "", "", "", "", "", "", "", f"input: {bad.message}"])
-            self.write(bad.excel_row, RESULT_PREFIX + "Input", f"Failed: {bad.message}")
+            self.write(bad.excel_row, INPUT_RESULT_COLUMN, f"Failed: {bad.message}")
 
     def log(self, row, step_name, result):
         sheet = self.book[LOG_SHEET] if LOG_SHEET in self.book.sheetnames else self._new_log()

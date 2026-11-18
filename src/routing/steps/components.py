@@ -9,6 +9,7 @@ from routing.model.result import StepResult
 from routing.sap.screens import ca02, components
 from routing.steps.base import Step
 from routing.steps.production_version import routing_created_this_run, target_routing
+from routing.steps.routing import single_routing
 
 # Operation per unassigned component (first match wins), from SAP_automation/change_bom/routing.py:
 #   packaging                                       -> 0030
@@ -37,11 +38,21 @@ class AllocateComponents(Step):
 
     def applies(self, row):
         request = row.request
+        if request.action is Action.ASSIGN:                 # existing routing (UiPath main_bom_assignment)
+            return True
         return (request.action is Action.CREATE and request.params.assign_components
                 and layouts.layout_for(request).allocate_components)
 
     def plan(self, row, ctx):
         request, plan = row.request, row.plan
+        if request.action is Action.ASSIGN:
+            target, reason = single_routing(row, ctx.routings(request.material))
+            if target is not None and target.deleted:
+                target, reason = None, f"routing inactive {target.key}"
+            if target is None:
+                plan.skip[self.name] = reason
+                return
+            row.key, plan.target = target.key, target
         if target_routing(row, ctx) is None and not routing_created_this_run(row):
             plan.skip[self.name] = "no routing to allocate components to"
             return
@@ -50,6 +61,10 @@ class AllocateComponents(Step):
         alt_boms = active if choice.all else [choice.number]
         if not alt_boms:
             plan.skip[self.name] = "no active alt BOM"
+            return
+        if not choice.all and choice.number not in active:
+            plan.skip[self.name] = (f"alt BOM {choice.number} not active "
+                                    f"(active: {', '.join(map(str, active)) or 'none'})")
             return
         plan.component_alt_boms = alt_boms
 
@@ -68,16 +83,18 @@ class AllocateComponents(Step):
         for alt_bom in row.plan.component_alt_boms:
             note = ca02.open_routing(sap, row.key, size, ctx.plant)
             components.open_allocation(sap, alt_bom, len(ctx.alt_boms(material)))
-            rows, warning = components.unassigned_components(sap)
+            # as SAP_automation assign_components: pass 1 = rows planned for 0030, pass 2 = every
+            # row still unassigned -> 0020; the table is read again before each pass
+            assigned = {}
+            for operation in (PACKAGING_OPERATION, DEFAULT_OPERATION):
+                rows, warning = components.unassigned_components(sap)
+                picked = [r for r, description in rows
+                          if operation == DEFAULT_OPERATION or planned_operation(description, op_0030)[0] == operation]
+                if picked:
+                    components.assign(sap, picked, operation)
+                    assigned[operation] = len(picked)
             notes += [n for n in (note, warning) if n]
-            by_operation = {}
-            for visible_row, description in rows:
-                operation, _ = planned_operation(description, op_0030)
-                by_operation.setdefault(operation, []).append(visible_row)
-            for operation in (PACKAGING_OPERATION, DEFAULT_OPERATION):     # 0030 first, as SAP_automation
-                if by_operation.get(operation):
-                    components.assign(sap, by_operation[operation], operation)
-            ca02.save(sap, f"components {row.key} B{alt_bom}")
-            done = ", ".join(f"{op}: {len(r)}" for op, r in by_operation.items()) or "nothing unassigned"
+            ca02.save(sap, f"components {row.key} B{alt_bom}")     # also when nothing was assigned
+            done = ", ".join(f"{op}: {n}" for op, n in assigned.items()) or "nothing unassigned"
             parts.append(f"B{alt_bom} {done}")
-        return StepResult.done("; ".join(parts) + (f" ({'; '.join(notes)})" if notes else ""))
+        return StepResult.done("; ".join(parts) + (f" ({'; '.join(dict.fromkeys(notes))})" if notes else ""))

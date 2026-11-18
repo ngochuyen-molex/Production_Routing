@@ -54,7 +54,7 @@ def routings_from_resources(df, materials=()):
             first = rows.iloc[0]
             grouped[material].append(Routing(
                 key=RoutingKey(material, _text(group), counter),
-                description="" if first.ROUTING_DESCRIPTION is None else str(first.ROUTING_DESCRIPTION),
+                description=_text(first.ROUTING_DESCRIPTION),
                 deleted=_text(first.DELETION_FLAG) == "X",
                 operations=tuple(Operation(number="", work_center=_text(wc)) for wc in rows["RESOURCE"])))
     return _by_material(grouped, materials)
