@@ -66,7 +66,8 @@ SQL_OPERATION_VALUES = """
         AND mp.PLNTY = 'N' -- show only visible routing in sap
         AND (po.VORNR = '0020'            -- production
              OR cr.ARBPL LIKE 'YMHI%%'    -- sorting / lubricant
-             OR po.STEUS = 'PP94')        -- final step (pack & send to WH)
+             OR po.STEUS = 'PP94'         -- final step (pack & send to WH)
+             OR po.STEUS = 'ZP04')        -- trial routing: only to explain a missing PP94
         AND pk.DW_SOFT_DELETE_FLAG = 0
         AND mp.DW_SOFT_DELETE_FLAG = 0
         AND ps.DW_SOFT_DELETE_FLAG = 0 -- deleted sequences (e.g. old A505110D at GC 00)

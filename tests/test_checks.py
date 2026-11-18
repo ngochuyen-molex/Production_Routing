@@ -153,6 +153,23 @@ def test_operation_values_finds_final_step_after_sorting():
     assert out["SORTING_OPERATION"].tolist() == ["", "0030", "0030"]
 
 
+def test_final_step_is_pp94_only_zp04_is_trial():
+    trial, no_final = "000000005000000001", "000000005000000002"
+    responses = {"AS CONTROL_KEY": (OP_COLUMNS, OP_RESPONSES["AS CONTROL_KEY"][1] + [
+        op(trial, "P0541470", "02", "TRIAL PM2-A", "0020", "PP01", "PM2-A", 500.0, "PC"),
+        op(trial, "P0541470", "02", "TRIAL PM2-A", "0040", "ZP04", "OPMINS", 4000.0, "PC"),
+        op(no_final, "M6750000", "01", "MD-Regrinding", "0020", "PP01", "MN15-09", 500.0, "PC"),
+    ])}
+    df = pd.DataFrame({"Material": ["5052771989", "5000000001", "5000000002", "99999"],
+                       "Resource": ["MN15-09", "PM2-A", "MN15-09", "MN15-09"],
+                       "Capacity": [1000, 500, 500, 1000], "Tool Cavity": [8, 8, 8, 8]})
+    out = operation_values.check_routing_values(df, conn=FakeConn(responses))
+    assert out["CHECK_FINAL"].tolist() == ["Match", "No final step PP94 (ZP04 = trial routing)",
+                                           "No final step PP94", "No routing found"]
+    assert out["FINAL_OPERATION"].tolist()[1] == ""     # ZP04 is never taken as the final step
+    assert "Routing without final step PP94: 2" in operation_values.summary(out)
+
+
 def test_standard_values_must_be_one_hour_at_0020():
     df = pd.DataFrame({
         "Material": ["5052771989", "5016441810", "99999"],

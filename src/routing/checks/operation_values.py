@@ -26,6 +26,7 @@ TOLERANCE = 0.001
 PRODUCTION_OPERATION = "0020"
 SORTING_RESOURCE = "YMHI"
 FINAL_CONTROL_KEY = "PP94"
+TRIAL_CONTROL_KEY = "ZP04"  # trial routing, not a final step
 
 # Standard values required at operation 0020.
 STANDARD_VALUE = 1.0
@@ -66,6 +67,17 @@ def _compare_sorting(expected, actual, routing_found):
         return "No routing found"
     if actual is None:
         return "Sorting capacity given, no YMHI operation" if pd.notna(expected) else ""
+    return _compare(expected, actual)
+
+
+def _compare_final(expected, actual, matches):
+    """Final step is PP94 only. ZP04 marks a trial routing, it is never the final step."""
+    if matches.empty:
+        return "No routing found"
+    if actual is None:
+        if (matches["CONTROL_KEY"] == TRIAL_CONTROL_KEY).any():
+            return f"No final step {FINAL_CONTROL_KEY} ({TRIAL_CONTROL_KEY} = trial routing)"
+        return f"No final step {FINAL_CONTROL_KEY}"
     return _compare(expected, actual)
 
 
@@ -216,7 +228,7 @@ def check_routing_values(df, conn=None, plant=PLANT):
         out["BASE_QTY_FINAL"].append(qty_final)
         out["CHECK_0020"].append(_compare(capacity, qty_20))
         out["CHECK_SORTING"].append(_compare_sorting(sorting_capacity[idx], qty_sort, not matches.empty))
-        out["CHECK_FINAL"].append(_compare(capacity_final, qty_final))
+        out["CHECK_FINAL"].append(_compare_final(capacity_final, qty_final, matches))
 
         out["SETUP_0020"].append(setup)
         out["MACHINE_0020"].append(machine)
@@ -250,11 +262,13 @@ def summary(df):
                  & df["CHECK_SORTING"].isin(["Match", ""])).sum()
     std_value_problem = (~df["STD_VALUE_CHECK"].isin(["Match", "No routing found"])).sum()
     header_problem = (~df["CHECK_HEADER"].isin(["Match", "No routing found"])).sum()
+    no_final = df["CHECK_FINAL"].str.startswith(f"No final step {FINAL_CONTROL_KEY}").sum()
     eff_util_mismatch = ((df["EFF_CHECK"] == "Mismatch") | (df["UTIL_CHECK"] == "Mismatch")).sum()
 
     return (f"  Capacity all match: {all_match}\n"
             f"  Capacity mismatch (0020, sorting or final): {mismatch}\n"
             f"  No routing found: {no_routing}\n"
+            f"  Routing without final step {FINAL_CONTROL_KEY}: {no_final}\n"
             f"  Standard values not 1.000 H at 0020: {std_value_problem}\n"
             f"  Header qty not equal to Tool Cavity at 0020: {header_problem}\n"
             f"  Efficiency / utilization mismatch: {eff_util_mismatch}")

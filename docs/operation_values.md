@@ -26,6 +26,21 @@ The final step is found by control key, not by number, because a sorting step mo
 | With lubricant (e.g. 5052760989) | MN15-14 PP01, 923 | YMHI-1 PP96, 100,000 | **OMINS PP94, 7,384** |
 
 Result values: `Match`, `Mismatch`, `Missing capacity` (Excel value blank), `No routing found`.
+
+`CHECK_FINAL` - the final step is **PP94 only**; `ZP04` is the control key of a **trial routing** and
+is never taken as the final step:
+
+| `CHECK_FINAL` | Meaning | What to do |
+|---|---|---|
+| `Match` | PP94 base qty = `Capacity × Tool Cavity` | nothing |
+| `Mismatch` | PP94 base qty differs | correct the PP94 base qty in CA02 (or the Excel) |
+| `Missing capacity` | `Capacity` or `Tool Cavity` blank in the Excel | fill the Excel |
+| `No final step PP94 (ZP04 = trial routing)` | routing found, it ends with ZP04: a trial routing | check the right (non-trial) routing was matched; fill group / group counter |
+| `No final step PP94` | routing found, but it has neither PP94 nor ZP04 (e.g. regrinding: 0020 is the only step) | check in CA02 whether a final step is expected |
+| `No routing found` | no routing matches material + resource (+ tool), or group / group counter | check the input; run `routing-condition` / `delete-status` |
+
+The summary printed at the end counts these as `Routing without final step PP94: N`.
+
 `CHECK_SORTING` is blank when the routing has no YMHI operation and no `Sorting Capacity` is given,
 and `Sorting capacity given, no YMHI operation` when only the Excel has one.
 `EFF_CHECK` / `UTIL_CHECK` show `No Excel efficiency` / `No Excel utilization` when the input has no value.
@@ -134,7 +149,7 @@ match) and is kept for parity with the old efficiency query.
 |---|---|---|
 | PP01 | 0020 (a few at 0030) | production |
 | PP94 | always the last operation: 0030, 0040, 0050, 0060 | inspection, pack & send to WH |
-| ZP04 | last operation at 0030 / 0040 (OMINS etc.); 0020 on YMHI-4 | pack, or regrinding |
+| ZP04 | last operation at 0030 / 0040 (OMINS etc.); 0020 on YMHI-4 | **trial routing** (pack, or regrinding) - never the final step |
 | PP96 | 0030 on YMHI | sorting / lubricant |
 | PP96 | 0020 on MDTR, PLTT, ASTR, ASMT, STPT | other single-step processes |
 | PPSB | sub-operation under 0020 (e.g. 0020/0010 L505276B) | not returned by the current PLAS join, not checked |
@@ -153,9 +168,11 @@ match) and is kept for parity with the old efficiency query.
    - Hi-coat: 0020 `YMHI` PP01 "HICOAT M/C" (M5133701/03 and /04).
    - Regrinding: 0020 `YMHI-4` ZP04 "MD-Regrinding", the only step (M6750000/01, M9675002/01).
    Possible fix: count YMHI as sorting only after 0020 (`OPERATION_NUMBER > '0020'`), or require PP96.
-3. **Final step is not always PP94.** About 2,900 routings end with **ZP04** pack (e.g. OMINS, OPMINS);
-   for these `CHECK_FINAL` is `No routing found`. Example: P0541470/02 ends 0040 `OPMINS` ZP04.
-   Possible fix: final = last operation with control key PP94 or ZP04, after production.
+3. **Final step is PP94 only (decided 2026-11-18).** About 2,900 routings end with **ZP04** instead
+   (e.g. OMINS, OPMINS; P0541470/02 ends 0040 `OPMINS` ZP04). ZP04 is the control key of **trial
+   routings**, so it is never accepted as the final step; `CHECK_FINAL` says why there is no PP94
+   (meanings: "Result values" above). The query fetches ZP04 operations only for that message.
+   Logged in `docs/verification.md` E.
 4. **Regrinding has no final step** (production is the only operation), so `CHECK_FINAL` cannot match.
 5. **Sub-operations (PPSB)** are not read. If their base quantity can differ from the 0020 main
    operation, they need their own query.
