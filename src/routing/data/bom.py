@@ -3,12 +3,14 @@ from routing.core.clean import to_sap_matnr
 from routing.core.config import PLANT
 from routing.core.db import query_in_batches
 
-# Active alternative BOM = usage 1, status 01 (shared by both queries)
+# Active alternative BOM = usage 1 (production), status 01 (active), still in SAP (shared by both queries)
 SQL_ACTIVE_ALT_BOMS = """
     FROM MLX_DATALAKE.MLX_SAP_ECC.MAST m
     JOIN MLX_DATALAKE.MLX_SAP_ECC.STKO s
         ON m.STLNR = s.STLNR AND m.STLAL = s.STLAL
+        AND s.DW_SOFT_DELETE_FLAG = 0
     WHERE m.STLAN = '1' AND m.WERKS = %s AND s.STLST = '01'
+        AND m.DW_SOFT_DELETE_FLAG = 0  -- 49 rows at 1901 (2026-11-18) are gone from SAP
         AND m.MATNR IN ({placeholders})
 """
 
