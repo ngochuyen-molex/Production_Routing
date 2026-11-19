@@ -10,12 +10,15 @@ STATUS_BAR = "wnd[0]/sbar"
 BTN_ENTER = "tbar[0]/btn[0]"            # relative to a window: f"wnd[1]/{BTN_ENTER}"
 BTN_BACK = "wnd[0]/tbar[0]/btn[3]"
 BTN_SAVE = "wnd[0]/tbar[0]/btn[11]"
+POPUP_YES = "wnd[1]/usr/btnSPOP-OPTION1"     # standard SAP confirmation popup, first button
+POPUP_NO = "wnd[1]/usr/btnSPOP-OPTION2"      # second button
 
 # ------------------------------------------------------------ CA01 / CA02 initial screen
 INIT_MATERIAL = "wnd[0]/usr/ctxt[0]"
 INIT_PLANT = "wnd[0]/usr/ctxt[1]"
 CA01_COPY_FROM = "wnd[0]/tbar[1]/btn[5]"
 
+#first popup
 # "Entry Option: Group" - groups of the material (CA01 + CA02); from SAP_automation routing.py
 GROUP_POPUP_TABLE = "wnd[1]/usr/tblSAPLCPSLTCTRL_2110"
 GROUP_POPUP_GROUP_COL = 0               # group only filled on the first row of each group
@@ -27,10 +30,14 @@ TITLE_SELECT_TYPE = "Select Type"                       # popup title as in the 
 COPY_SELECT_TYPE_CONTINUE = "wnd[1]/tbar[0]/btn[0]"     # "Select Type" popup
 COPY_MATERIAL = "wnd[1]/usr/ctxt[0]"                    # "Select Object to be Copied"
 COPY_PLANT = "wnd[1]/usr/ctxt[1]"
-COPY_LIST_TABLE = "wnd[1]/usr/tblSAPLCPSLTCTRL_2120"    # routings to copy from
-COPY_LIST_GROUP_COL = 0                 # VERIFY: UiPath only checks cell [0,0] = a group ('MD55917')
-COPY_LIST_COUNTER_COL = 1               # VERIFY: not in UiPath (it reads by header name); record it
-COPY_LIST_DESC_COL = 2                  # UiPath double-clicks col 2
+
+#second pop up
+COPY_LIST_TABLE = "wnd[1]/usr/tblSAPLCPSLTCTRL_2120"    # routings to copy from ("TL Groups")
+# recorded 2026-11-19 (material 5051070099): ctxt[0,row] group (first row of each group only),
+# txt[1,row] GCt, txt[7,row] description; columns between: lot sizes, unit, status, usage
+COPY_LIST_GROUP_COL = 0
+COPY_LIST_COUNTER_COL = 1
+COPY_LIST_DESC_COL = 7                  # double-clicked; UiPath's tableCol='2' was a different count
 
 # "Choose Alternative BOM" popup: list, element txt[row, column position]; from SAP_automation
 BOM_POPUP = "wnd[1]/usr/sub/1"
@@ -46,6 +53,14 @@ HEADER_STATUS = "wnd[0]/usr/sub/6/ctxt[1]"
 HEADER_DELETION_FLAG = "wnd[0]/usr/sub/6/chk"           # CA02 header details
 BTN_HEADER = "wnd[0]/tbar[1]/btn[5]"                    # Header (F5) on the operation overview
 BTN_OPERATIONS = "wnd[0]/tbar[1]/btn[7]"                # Operations (CA01 header screens) / CompAlloc
+
+# CA01 "Create Routing: Operation - Check": after the header Enter SAP stops on each copied operation
+# without a setup value (status "Enter standard value Setup", e.g. C_AUTO MP03). Same fields as
+# Operation Details; the setup unit field has no recorded id, it is found next to DETAIL_SETUP.
+TITLE_OPERATION_CHECK = "Operation - Check"
+SETUP_MISSING_TEXT = "Enter standard value Setup"
+SETUP_DEFAULT = "1"
+SETUP_DEFAULT_UNIT = "H"
 
 # CA02 header overview (routings of the selected group); from SAP_automation routing.py
 HEADER_LIST_TABLE = "wnd[0]/usr/tblSAPLCPDITCTRL_1200"
@@ -92,6 +107,7 @@ NEW_ASSIGNMENT_OPERATION = "wnd[1]/usr/txt[0]"
 MM02_PROD_VERSIONS = "wnd[0]/usr/sub/6/btn"
 VERSION_TABLE = "wnd[1]/usr/tblSAPLMDIAT_MKAL_NEW"
 VERSION_COL = 0
+VERSION_TEXT_COL = 1                    # version text; SAP_automation production_version_fix TEXT_COL, UiPath tableCol='1'
 VERSION_NEW_DETAILS = "wnd[1]/tbar[0]/btn[7]"
 VERSION_DELETE = "wnd[1]/tbar[0]/btn[14]"               # confirmed in 4 UiPath flows, no confirmation popup
 PV_VERSION = "wnd[2]/usr/ctxt[0]"

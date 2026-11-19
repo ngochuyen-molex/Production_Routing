@@ -114,7 +114,7 @@ class DeleteProductionVersion(Step):
         deleted = []
         for version in row.plan.existing_versions:
             if version.version in on_screen:
-                mm02.delete_version(sap, version.version)
+                mm02.delete_version(sap, version.version, version.text)
                 deleted.append(version.describe())
         if not deleted:
             mm02.close_and_save(sap, f"production versions of {row.request.material}")

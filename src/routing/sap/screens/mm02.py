@@ -61,18 +61,37 @@ def add_version(sap, version, text, key, alt_bom, bom_usage="1"):
     return warning
 
 
-def delete_version(sap, version):
-    """Select the row of `version` in the list and press Delete (UiPath: no confirmation popup,
-    delete is immediate). An unexpected popup stops the step instead of being confirmed blindly."""
+def delete_version(sap, version, expected_text=""):
+    """Delete exactly production version `version` (number from Snowflake for the routing's group +
+    group counter). Nothing is saved here - the caller saves, a failure leaves without saving.
+      1. find the row by version number (all pages) and check its text = `expected_text`
+         (as SAP_automation production_version_fix before a rename) - else nothing is touched
+      2. cursor on that row's version cell + row selected (UiPath clicks the row's cell: Delete acts on
+         the row under the cursor, so focusing the cell is what makes it the right row), then Delete
+      3. afterwards exactly this version is gone and every other version is still in the list"""
+    before = read_versions(sap)
     row = table.find_row(sap, el.VERSION_TABLE,
                          lambda r: table.cell_text(sap, el.VERSION_TABLE, el.VERSION_COL, r) == version,
                          blank_col=el.VERSION_COL)
     if row is None:
         raise SapError(f"Production version {version} not in the list")
-    sap.find(el.VERSION_TABLE).getAbsoluteRow(int(sap.find(el.VERSION_TABLE).VerticalScrollbar.Position) + row).selected = True
+    current = table.cell_text(sap, el.VERSION_TABLE, el.VERSION_TEXT_COL, row)
+    if expected_text and current.strip().upper() != expected_text.strip().upper():
+        raise SapError(f"Production version {version} has text '{current}', expected '{expected_text}' "
+                       f"- not deleted")
+    sap.find(table.cell_id(sap, el.VERSION_TABLE, el.VERSION_COL, row)).setFocus()
+    grid = sap.find(el.VERSION_TABLE)
+    grid.getAbsoluteRow(int(grid.VerticalScrollbar.Position) + row).selected = True
     sap.press(el.VERSION_DELETE)
     if sap.has_window(2):
         raise SapError(f"Unexpected popup after deleting version {version}: {popup_text(sap, 2)}")
+
+    after = read_versions(sap)
+    expected = [v for v in before if v != version]
+    if after != expected:
+        gone = sorted(set(before) - set(after))
+        raise SapError(f"Delete of version {version} removed {', '.join(gone) or 'nothing'} "
+                       f"- not saved")
 
 
 def close_and_save(sap, what):
