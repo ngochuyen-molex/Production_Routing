@@ -2,7 +2,7 @@
 
 Scripts that build and check MES workflows and Tool Plan Matrix rows from SAP routings for the same material.
 Code lives in `src/routing/opc/`. Run with `routing opc <name> -i INPUT.xlsx [-o OUTPUT.xlsx]`
-(without `-i` / `-o` the `INPUT_FILE` / `OUTPUT_FILE` defaults at the top of each script are used).
+(without `-i` you are asked for the file; without `-o` the output is `<input>_<command>_result.xlsx` next to the input).
 
 | Script | Command | Purpose |
 |---|---|---|
@@ -40,7 +40,7 @@ Example: material `5019506039` has SAP counters 15, 17, 19, 21, 22 and the input
 ## add_workflow.py
 
 ### Input
-Excel file (`INPUT_FILE`) with columns `Material`, `group counter`, `Resource`, optional `Tool`.
+Excel file (`-i`) with columns `Material`, `group counter`, `Resource`, optional `Tool`.
 
 - **Target name**: see Workflow naming.
 - **New description**: `Resource-Tool-Material` (tool left out if blank or `0`).
@@ -96,7 +96,7 @@ Example: `5034780419-11` exists at revision B →
 | to spec | Next step name |
 | Is Last Step | `1` when Spec = `End Spec` |
 
-### Output (`OUTPUT_FILE`)
+### Output (`-o`)
 | Sheet | Content |
 |---|---|
 | Workflow To Add | Upload file: `Execution` and `Completion Message` (blank) first; existing block (UPDATE, status 2), then new revision (INSERT) |
@@ -131,7 +131,7 @@ Stored revisions are read by joining `Workflow.WorkflowBaseId = WorkflowBase.Wor
 ## compare_workflow.py
 
 ### Input
-Excel file (`INPUT_FILE`) with columns `Material` and `group counter`.
+Excel file (`-i`) with columns `Material` and `group counter`.
 - Rows with blank material or counter, and target names used by more than one material, are moved to their own sheets.
 
 ### Comparison
@@ -161,7 +161,7 @@ Excel file (`INPUT_FILE`) with columns `Material` and `group counter`.
 Adds new Tool Plan Matrix (TPM) rows and updates the ideal cycle time of existing ones.
 
 ### Input
-Excel file (`INPUT_FILE`), first worksheet. Required columns:
+Excel file (`-i`), first worksheet. Required columns:
 
 `Material`, `Resource`, `Tool`, `group counter`, `Efficiency`, `Utilization`, `Tool Cavity`, `Dept`, `Priority`, `Sorting/ Lubricant`, `Sorting/ Lubricant Capacity`
 
@@ -210,7 +210,7 @@ Rows with the same Material + Resource + Tool (a blank tool only groups with oth
 
 Existing rows keep their own Spec.
 
-### Output (`OUTPUT_FILE`)
+### Output (`-o`)
 | Sheet | Content |
 |---|---|
 | Tool Plan Matrix Output | Upload file: `Execute` (`Insert/Update` for new rows, `Update` for existing) and blank `Completion Message`, then the TPM columns. Sorted by Material, RowType, Priority |
@@ -239,8 +239,6 @@ Columns differ per reason; a column that does not apply to a reason is left blan
 ### Config (top of file)
 | Setting | Default |
 |---|---|
-| `INPUT_FILE` | `add_routing_mold.xlsx` in Downloads (override with `-i`) |
-| `OUTPUT_FILE` | `output/add_mld.xlsx` in the repo (override with `-o`) |
 | `EFFICIENCY_FILE` | `Eff_Util_workcenter.xlsx` on the MXV share (`routing.core.config`) |
 | `EXCLUDED_RESOURCES` | `C_RFE`, `C_RE`, `C_FE` |
 

@@ -1,15 +1,13 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from routing.core.config import EFFICIENCY_FILE, OUTPUT_DIR
+from routing.core.config import EFFICIENCY_FILE
 from routing.opc.tpm_common import clean_string, validate_input_columns, fetch_existing_tool_plan_matrix, OUTPUT_COLUMNS, clean_tool
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-INPUT_FILE = Path(r"C:\Users\nguyeb3\Downloads\add_routing_mold.xlsx")
-OUTPUT_FILE = OUTPUT_DIR / "add_mld.xlsx"
 EXCLUDED_RESOURCES = {"C_RFE", "C_RE", "C_FE"}
 REQUIRED_COLUMNS = [
     "Material", "Resource", "Tool", "group counter", "Efficiency", "Utilization",
@@ -338,7 +336,7 @@ def process_sorting_rows(existing_df, sorting_df):
 # ============================================================
 # MAIN
 # ============================================================
-def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
+def main(input_file, output_file):
     input_file = Path(input_file)
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -448,7 +446,3 @@ def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
 
     print(f"Final TPM rows: {len(final_df)}.")
     print(f"Finished: {output_file}")
-
-
-if __name__ == "__main__":
-    main()

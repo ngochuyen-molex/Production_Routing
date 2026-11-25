@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from routing.core.config import OUTPUT_DIR
 from routing.opc.tpm_common import (
     OUTPUT_COLUMNS,
     add_material_resource_key,
@@ -15,12 +14,6 @@ from routing.opc.tpm_common import (
 # ============================================================
 # CONFIG
 # ============================================================
-
-INPUT_FILE = Path(
-    r"C:\Users\nguyeb3\Downloads\delete_mold.xlsx"
-)
-
-OUTPUT_FILE = OUTPUT_DIR / "delete_tpm.xlsx"
 
 REQUIRED_COLUMNS = [
     "Material",
@@ -103,7 +96,7 @@ def delete_matching_rows(existing_df, delete_df):
 # MAIN
 # ============================================================
 
-def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
+def main(input_file, output_file):
     input_file = Path(input_file)
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +160,3 @@ def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
         )
 
     print(f"Finished: {output_file}")
-
-
-if __name__ == "__main__":
-    main()

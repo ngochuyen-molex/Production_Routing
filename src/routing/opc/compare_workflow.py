@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from routing.core.config import OUTPUT_DIR, PLANT
+from routing.core.config import PLANT
 from routing.core.db import snowflake_session
 from routing.data.routing import group_counters
 from routing.opc.tpm_common import clean_string, get_sql_connection, validate_input_columns
@@ -11,9 +11,6 @@ from routing.opc.tpm_common import clean_string, get_sql_connection, validate_in
 # ============================================================
 # CONFIG
 # ============================================================
-
-INPUT_FILE = Path(r"C:\Users\nguyeb3\Downloads\add_worflow_fixlogic.xlsx")
-OUTPUT_FILE = OUTPUT_DIR / "workflow_comparison.xlsx"
 
 REQUIRED_COLUMNS = ["Material", "group counter"]
 
@@ -342,7 +339,7 @@ def build_missing_workflows(prepared_df, target_df, source_df, candidate_df):
 # MAIN
 # ============================================================
 
-def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
+def main(input_file, output_file):
     input_file = Path(input_file)
     output_file = Path(output_file)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -398,7 +395,3 @@ def main(input_file=INPUT_FILE, output_file=OUTPUT_FILE):
         blank_key_df.to_excel(writer, sheet_name="Blank Material Counter", index=False)
 
     print(f"Finished: {output_file}")
-
-
-if __name__ == "__main__":
-    main()
