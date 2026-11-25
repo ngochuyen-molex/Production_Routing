@@ -14,7 +14,7 @@ import importlib
 import sys
 import traceback
 
-from routing.core.excel import ask_path
+from routing.core.excel import ask_path, clean_path, with_suffix
 from routing.model.enums import PHASES, Action
 
 # command -> (module, function, accepts sheet_name)
@@ -73,8 +73,11 @@ def run_check(name, file=None, output=None, sheet=None):
 
 
 def run_opc(name, file=None, output=None):
+    """Default output: next to the input, '<input>_<command>_result.xlsx'."""
     module = importlib.import_module(OPC[name])
-    return module.main(input_file=file or module.INPUT_FILE, output_file=output or module.OUTPUT_FILE)
+    file = clean_path(file or ask_path())
+    output = clean_path(output) if output else with_suffix(file, f"_{name.replace('-', '_')}_result")
+    return module.main(input_file=file, output_file=output)
 
 
 def build_parser():
@@ -104,8 +107,8 @@ def build_parser():
 
     opc = sub.add_parser("opc", help="generate an OpCenter upload file")
     opc.add_argument("name", choices=sorted(OPC))
-    opc.add_argument("-i", "--input", help="input Excel (default: INPUT_FILE in the script)")
-    opc.add_argument("-o", "--output", help="output Excel (default: output/<name>.xlsx)")
+    opc.add_argument("-i", "--input", help="input Excel (asked for when missing)")
+    opc.add_argument("-o", "--output", help="output Excel (default: <input>_<name>_result.xlsx next to the input)")
 
     sub.add_parser("list", help="show all commands")
     return parser
