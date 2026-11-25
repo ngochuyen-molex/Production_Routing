@@ -5,7 +5,8 @@ import pandas as pd
 from routing.core.config import PLANT
 from routing.core.db import snowflake_session
 from routing.data.routing import group_counters
-from routing.opc.tpm_common import clean_string, get_sql_connection, validate_input_columns
+from routing.data.workflow import fetch_workflow_steps
+from routing.opc.tpm_common import clean_string, validate_input_columns
 
 
 # ============================================================
@@ -79,49 +80,7 @@ def fetch_workflows_by_name(target_workflows):
     if not target_workflows:
         return pd.DataFrame(columns=STEP_COLUMNS)
 
-    placeholders = ",".join(["?"] * len(target_workflows))
-
-    query = f"""
-    SELECT
-        LEFT(wfb.WorkflowName, CHARINDEX('-', wfb.WorkflowName + '-') - 1) AS Material,
-        wfb.WorkflowName,
-        wf.WorkflowRevision,
-        ws.WorkflowStepName AS StepName,
-        ws.RouteStepId,
-        rs.Name AS RouteStepName,
-        ws.Sequence,
-        erb.ERPRouteName
-    FROM [STDS].[EXCRSCh].Workflow wf
-
-    INNER JOIN [STDS].[EXCRSCh].WorkflowBase wfb WITH (NOLOCK)
-        ON wf.WorkflowId = wfb.RevOfRcdId
-
-    LEFT JOIN [STDS].[EXCRSCh].WorkflowStep ws WITH (NOLOCK)
-        ON ws.WorkflowId = wf.WorkflowId
-
-    LEFT JOIN [STDS].[EXCRSCh].RouteStep rs WITH (NOLOCK)
-        ON rs.RouteStepId = ws.RouteStepId
-
-    LEFT JOIN [STDS].[EXCRSCh].ERPRoute erp WITH (NOLOCK)
-        ON erp.ERPRouteId = CASE
-            WHEN wf.ERPRouteId = '0000000000000000' THEN (
-                SELECT eb.RevOfRcdId
-                FROM [STDS].[EXCRSCh].ERPRouteBase eb
-                WHERE eb.ERPRouteBaseId = wf.ERPRouteBaseId
-            )
-            ELSE wf.ERPRouteId
-        END
-
-    LEFT JOIN [STDS].[EXCRSCh].ERPRouteBase erb WITH (NOLOCK)
-        ON erb.ERPRouteBaseId = erp.ERPRouteBaseId
-
-    WHERE wfb.WorkflowName IN ({placeholders})
-
-    ORDER BY wfb.WorkflowName, ws.Sequence
-    """
-
-    with get_sql_connection() as conn:
-        target_df = pd.read_sql(query, conn, params=target_workflows)
+    target_df = fetch_workflow_steps(target_workflows).rename(columns={"MaterialKey": "Material"})[STEP_COLUMNS]
 
     return clean_workflow_df(target_df)
 
