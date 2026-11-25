@@ -86,9 +86,19 @@ def _reset(ctx):
         return f" (SAP reset failed: {ctx.sap_lost})"
 
 
+def _sap_state(ctx):
+    """Screen + status bar text at the moment of the error ('' when SAP can't be read)."""
+    try:
+        return ctx.sap.where()
+    except Exception:
+        return ""
+
+
 def safe_run(step, row, ctx):
-    """Run one step; any error -> SAP reset (/n, popups closed) -> Failed, and the run goes on with
-    the next row. Only when the reset itself fails is the run stopped (RunAborted in execute)."""
+    """Run one step; any error -> log the SAP screen / status bar -> SAP reset (/n, popups closed,
+    leave WITHOUT saving) -> Failed, and the run goes on with the next row. Save is never pressed
+    for a failed step: steps press it only as their last action. Only when the reset itself fails
+    is the run stopped (RunAborted in execute)."""
     try:
         return step.run(row, ctx)
     except SapSkip as skip:                     # material refused by SAP (E3 / not exist): skip as UiPath did
@@ -96,6 +106,9 @@ def safe_run(step, row, ctx):
     except Exception as error:
         message = str(error) or type(error).__name__
         if ctx._sap is not None:
+            state = _sap_state(ctx)             # read before the reset clears the screen
+            if state and state not in message:
+                message += f" [SAP: {state}]"
             message += _reset(ctx)
         return StepResult.failed(message)
 

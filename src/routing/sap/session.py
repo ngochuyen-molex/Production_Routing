@@ -32,6 +32,11 @@ class SapSkip(SapError):
 SKIP_TEXT = re.compile(r"\bE3\b|NOT EXIST", re.IGNORECASE)
 WARNING_ENTERS = 2                      # UiPath sends an extra Enter after the initial screen
 
+# exit popup after "/n" in reset(): a save question is answered No, "data will be lost" Yes.
+# \bsave\b so "unsaved" does not count as a save question.
+SAVE_QUESTION = re.compile(r"\bsave\b", re.IGNORECASE)
+DATA_LOST = re.compile(r"\blost\b|exit editing", re.IGNORECASE)
+
 
 class SlowSAP:
     """Wraps a SAP GUI object: waits STEP_DELAY after actions, reads are not delayed.
@@ -185,14 +190,34 @@ class SapSession:
             text = ""
         return ", ".join(windows) + (f", status '{text}'" if text else "")
 
+    def popup_text(self, window):
+        """All visible texts of a popup (title + labels / message lines)."""
+        texts = [self.window_title(window)]
+        if self.exists(f"wnd[{window}]/usr"):
+            for element in self.find(f"wnd[{window}]/usr").Children:
+                texts.append(str(getattr(element, "Text", "")).strip())
+        return " | ".join(t for t in texts if t)
+
     def reset(self):
-        """Close popups and leave the transaction without saving, so the next row starts clean."""
+        """Close popups and leave the transaction WITHOUT saving, so the next row starts clean.
+        The exit popup is read first: a save question gets No, "data will be lost" gets Yes
+        (= leave, nothing saved); any other popup -> SapError, never a blind Yes."""
         for window in (3, 2, 1):
             if self.has_window(window):
                 self.find(f"wnd[{window}]").close()
         self.set_text(el.OKCODE, "/n")
         self.enter()
-        if self.has_window(1):          # "Data will be lost" -> Yes
-            yes = "wnd[1]/usr/btnSPOP-OPTION1"
-            if self.exists(yes):
-                self.press(yes)
+        if not self.has_window(1):
+            return
+        text = self.popup_text(1)
+        if SAVE_QUESTION.search(text):
+            answer = el.POPUP_NO                    # "Save changes?" -> No
+        elif DATA_LOST.search(text):
+            answer = el.POPUP_YES                   # "Data will be lost. Exit?" -> Yes, leave unsaved
+        else:
+            raise SapError(f"Unknown popup while leaving without saving: '{text}'")
+        if not self.exists(answer):
+            raise SapError(f"Popup while leaving without saving has no expected button: '{text}'")
+        self.press(answer)
+        if self.has_window(1):
+            raise SapError(f"Popup still open after leaving without saving: '{self.popup_text(1)}'")

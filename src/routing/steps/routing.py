@@ -4,7 +4,9 @@ from routing.layouts.catalog import MACHINE_NAME
 from routing.model.entities import Routing, RoutingKey, is_trial_resource
 from routing.model.enums import Action
 from routing.model.result import StepResult
+from routing.sap import elements as el
 from routing.sap.screens import ca01, ca02, operations
+from routing.sap.session import SapError
 from routing.steps.base import Step
 
 CREATE_STATUS = "4"         # production / released (README.md Background, decisions)
@@ -106,14 +108,18 @@ class CreateRouting(Step):
         ca01.choose_alt_bom(sap, request.params.alt_bom.number or next(iter(ctx.alt_boms(request.material)), 1))
         text = layouts.description(layout, request)
         group, counter = ca01.fill_header(sap, text, CREATE_STATUS)
-        ca01.open_operations(sap)
+        ca01.open_operations(sap)                # fills a missing setup (1 H) if SAP asks
 
         values = layouts.operation_values(layout, request)
         for value in values:
             if value.work_center:
                 operations.set_work_center(sap, value.row, value.work_center)
         sap.enter()
+        # SAP may ask for the setup here too (row 2 of add_routing_test, STP 5051070099, 2026-11-19)
+        operations.fill_missing_setups(sap)
         sap.raise_on_error("work centers")
+        if not sap.exists(el.OPERATION_TABLE):
+            raise SapError(f"Operation overview not shown after the work centers ({sap.where()})")
         for value in values:
             if value.base_quantity is not None:
                 operations.set_base_quantity(sap, value.row, value.base_quantity)

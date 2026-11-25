@@ -506,9 +506,9 @@ def copy_sap(**windows):
         texts.setdefault("wnd[1]", "Entry Option: Group")
         texts[el.COPY_LIST_TABLE] = ""
         for r, (group, counter) in enumerate(rows):
-            texts[f"{el.COPY_LIST_TABLE}/txt[0,{r}]"] = group
-            texts[f"{el.COPY_LIST_TABLE}/txt[1,{r}]"] = counter
-            texts[f"{el.COPY_LIST_TABLE}/txt[2,{r}]"] = "desc"
+            texts[f"{el.COPY_LIST_TABLE}/ctxt[{el.COPY_LIST_GROUP_COL},{r}]"] = group      # recorded: ctxt
+            texts[f"{el.COPY_LIST_TABLE}/txt[{el.COPY_LIST_COUNTER_COL},{r}]"] = counter
+            texts[f"{el.COPY_LIST_TABLE}/txt[{el.COPY_LIST_DESC_COL},{r}]"] = "desc"
     fake = FakeSap(texts)
     if rows:
         table = fake.elements[el.COPY_LIST_TABLE]
@@ -526,7 +526,7 @@ def test_ca01_copy_dialog_all_popups():
     assert ca01.choose_copy_source(SapSession(fake), source, 3) == ""
     assert ("press", el.COPY_SELECT_TYPE_CONTINUE) in fake.actions
     assert fake.elements[el.COPY_MATERIAL].text == MAT
-    assert ("vkey", 2, f"{el.COPY_LIST_TABLE}/txt[2,1]") in fake.actions        # group carried to row 1
+    assert ("vkey", 2, f"{el.COPY_LIST_TABLE}/txt[7,1]") in fake.actions        # group carried to row 1
 
 
 def test_ca01_copy_dialog_only_list_and_none():
@@ -700,3 +700,208 @@ def test_action_is_case_insensitive_and_unknown_action_does_nothing():
                                 "Resource": "X"}).action is Action.ASSIGN
     with pytest.raises(InputError, match="unknown"):
         request_from_row(2, create_row(Action="CHANGE"))
+
+
+def test_setup_check_after_header_gets_setup_1_h_until_operation_overview():
+    from routing.sap import elements as el
+    from routing.sap.screens import ca01
+    from routing.sap.session import SapSession
+
+    fake = FakeSap({"wnd[0]": "Create Routing: Operation - Check", el.STATUS_BAR: el.SETUP_MISSING_TEXT,
+                    el.DETAIL_SETUP: ""})
+    fake.elements[el.STATUS_BAR].MessageType = "W"
+    setup = fake.elements[el.DETAIL_SETUP]
+    unit = FakeElement(fake, "wnd[0]/usr/sub/3/ctxt[9]")
+    act_type = FakeElement(fake, "wnd[0]/usr/sub/3/ctxt[10]")
+    machine = FakeElement(fake, "wnd[0]/usr/sub/3/txt[7]", "1.000")
+    for element, top, left in ((setup, 100, 200), (unit, 100, 300), (act_type, 101, 340), (machine, 120, 200)):
+        element.Top, element.Left = top, left
+    setup.Parent = type("Box", (), {"Children": [setup, unit, act_type, machine]})()
+    screens = iter([("", True), ("1.000", False)])        # 2nd operation already has a setup value
+
+    def enter(key):
+        fake.actions.append(("vkey", key, None))
+        typed.append((setup.text, unit.text))
+        nxt = next(screens, None)
+        if nxt is None:                                    # SAP moves on to the operation overview
+            fake.elements[el.OPERATION_TABLE] = FakeElement(fake, el.OPERATION_TABLE)
+            fake.elements["wnd[0]"].text = "Create Routing: Operation Overview"
+            fake.elements[el.STATUS_BAR].text = ""
+        else:
+            setup.text, unit.text = nxt[0], "" if nxt[1] else "H"
+    typed = []
+    fake.elements["wnd[0]"].sendVKey = enter
+
+    sap = SapSession(fake)
+    assert ca01.on_setup_check(sap)
+    assert ca01.open_operations(sap) == 3
+    assert typed == [("1", "H"), ("1", "H"), ("1.000", "H")]      # blank -> 1 H, existing value kept
+    assert act_type.text == "" and machine.text == "1.000"           # only the unit right of setup
+    assert ("press", el.BTN_OPERATIONS) not in fake.actions           # overview reached, no btn[7]
+
+
+def _exit_popup_sap(popup_text):
+    """Fake SAP whose '/n' + Enter opens an exit popup with `popup_text` and Yes / No buttons."""
+    from routing.sap import elements as el
+    from routing.sap.session import SapSession
+
+    fake = FakeSap({"wnd[0]": "Create Routing: Operation Overview", el.OKCODE: "", el.STATUS_BAR: ""})
+    fake.elements[el.STATUS_BAR].MessageType = ""
+
+    def close_popup():
+        for key in [k for k in fake.elements if k.startswith("wnd[1]")]:
+            del fake.elements[key]
+
+    def press(button):
+        fake.actions.append(("press", button))
+        close_popup()
+
+    def enter(key):
+        fake.actions.append(("vkey", key, None))
+        if fake.elements[el.OKCODE].text == "/n" and popup_text is not None:
+            line = FakeElement(fake, "wnd[1]/usr/txt", popup_text)
+            line.Text = popup_text
+            fake.elements["wnd[1]"] = FakeElement(fake, "wnd[1]", "Exit")
+            fake.elements["wnd[1]/usr"] = FakeElement(fake, "wnd[1]/usr")
+            fake.elements["wnd[1]/usr"].Children = [line]
+            for button in (el.POPUP_YES, el.POPUP_NO):
+                fake.elements[button] = FakeElement(fake, button)
+                fake.elements[button].press = (lambda b=button: press(b))
+    fake.elements["wnd[0]"].sendVKey = enter
+    return fake, SapSession(fake)
+
+
+def test_reset_never_saves_save_question_no_data_lost_yes_unknown_stops():
+    from routing.sap import elements as el
+    from routing.sap.session import SapError
+
+    fake, sap = _exit_popup_sap("Do you want to save the changes?")
+    sap.reset()
+    assert ("press", el.POPUP_NO) in fake.actions and ("press", el.POPUP_YES) not in fake.actions
+
+    fake, sap = _exit_popup_sap("Unsaved data will be lost. Exit editing?")     # 'unsaved' is not 'save'
+    sap.reset()
+    assert ("press", el.POPUP_YES) in fake.actions and ("press", el.POPUP_NO) not in fake.actions
+
+    fake, sap = _exit_popup_sap("Something unexpected")
+    with pytest.raises(SapError):
+        sap.reset()
+    assert not [a for a in fake.actions if a[0] == "press"]                     # nothing clicked
+
+    fake, sap = _exit_popup_sap(None)                                           # no popup: just /n
+    sap.reset()
+    assert not [a for a in fake.actions if a[0] == "press"]
+
+
+def test_failed_step_logs_status_bar_and_never_presses_save():
+    from routing.sap import elements as el
+
+    fake, sap = _exit_popup_sap("Data will be lost. Exit editing?")
+    fake.elements[el.STATUS_BAR].text = "Work center XYZ does not exist"
+    fake.elements[el.STATUS_BAR].MessageType = "E"
+
+    class Boom:
+        name = "CreateRouting"
+        def run(self, row, ctx):
+            raise RuntimeError("(-2147483638, 'The data necessary ... not yet available.')")
+
+    ctx = FakeContext({}, sap=sap)
+    result = runner.safe_run(Boom(), None, ctx)
+
+    assert result.status is Status.FAILED
+    assert "Work center XYZ does not exist" in result.message                   # status bar logged
+    assert ("press", el.BTN_SAVE) not in fake.actions                           # never saved
+    assert ("press", el.POPUP_YES) in fake.actions                              # left without saving
+    assert not getattr(ctx, "sap_lost", "")                                     # run goes on
+
+
+def test_setup_check_is_handled_after_any_enter_not_only_after_the_header():
+    """Row 2 of add_routing_test (STP 5051070099, 2026-11-19): SAP asked for the setup after the
+    work-center Enter. fill_missing_setups is called there and in Operation Details too."""
+    from routing.sap import elements as el
+    from routing.sap.screens import operations
+    from routing.sap.session import SapSession
+
+    # back on the operation overview, SAP does not ask: nothing typed, nothing pressed
+    fake = FakeSap({"wnd[0]": "Create Routing: Operation Overview", el.STATUS_BAR: "", el.OPERATION_TABLE: ""})
+    fake.elements[el.STATUS_BAR].MessageType = ""
+    assert operations.fill_missing_setups(SapSession(fake)) == 0 and fake.actions == []
+
+    # after the work-center Enter: Operation - Check once, then the overview again
+    fake = FakeSap({"wnd[0]": "Create Routing: Operation - Check", el.STATUS_BAR: el.SETUP_MISSING_TEXT,
+                    el.DETAIL_SETUP: ""})
+    fake.elements[el.STATUS_BAR].MessageType = "W"
+    setup, unit = fake.elements[el.DETAIL_SETUP], FakeElement(fake, "wnd[0]/usr/sub/3/ctxt[9]")
+    setup.Top, setup.Left, unit.Top, unit.Left = 100, 200, 100, 300
+    setup.Parent = type("Box", (), {"Children": [setup, unit]})()
+
+    def enter(key):
+        fake.actions.append(("vkey", key, None))
+        fake.elements[el.OPERATION_TABLE] = FakeElement(fake, el.OPERATION_TABLE)
+        fake.elements["wnd[0]"].text = "Create Routing: Operation Overview"
+        fake.elements[el.STATUS_BAR].text, fake.elements[el.STATUS_BAR].MessageType = "", ""
+    fake.elements["wnd[0]"].sendVKey = enter
+
+    assert operations.fill_missing_setups(SapSession(fake)) == 1
+    assert (setup.text, unit.text) == ("1", "H")
+
+
+def _version_list_sap(versions, delete_focused=True):
+    """Fake MM02 version list (wnd[1]) with `versions` [(number, text)]. Delete removes the row under
+    the cursor (delete_focused) or, to simulate the bug seen live, always the first row."""
+    from routing.sap import elements as el
+    from routing.sap.session import SapSession
+
+    rows = list(versions)
+    fake = FakeSap({"wnd[0]": "", "wnd[1]": "Production Version Overview", el.STATUS_BAR: "",
+                    el.VERSION_TABLE: ""})
+    fake.elements[el.STATUS_BAR].MessageType = ""
+    grid = fake.elements[el.VERSION_TABLE]
+    grid.VerticalScrollbar = type("Bar", (), {"Position": 0})()
+    grid.VisibleRowCount = 10
+    selected = {}
+    grid.getAbsoluteRow = lambda i: selected.setdefault(i, type("Row", (), {"selected": False})())
+
+    def render():
+        for key in [k for k in fake.elements if k.startswith(f"{el.VERSION_TABLE}/")]:
+            del fake.elements[key]
+        for r, (number, text) in enumerate(rows):
+            fake.elements[f"{el.VERSION_TABLE}/ctxt[{el.VERSION_COL},{r}]"] = FakeElement(
+                fake, f"{el.VERSION_TABLE}/ctxt[{el.VERSION_COL},{r}]", number)
+            fake.elements[f"{el.VERSION_TABLE}/txt[{el.VERSION_TEXT_COL},{r}]"] = FakeElement(
+                fake, f"{el.VERSION_TABLE}/txt[{el.VERSION_TEXT_COL},{r}]", text)
+        grid.RowCount = len(rows) + 2                       # SAP shows empty rows below
+    render()
+
+    def delete():
+        fake.actions.append(("press", el.VERSION_DELETE))
+        index = 0
+        if delete_focused and fake.focus:
+            index = int(fake.focus.split(",")[1].rstrip("]"))
+        rows.pop(index)
+        render()
+    fake.elements[el.VERSION_DELETE] = FakeElement(fake, el.VERSION_DELETE)
+    fake.elements[el.VERSION_DELETE].press = delete
+    return fake, SapSession(fake), rows
+
+
+def test_delete_version_deletes_exactly_the_routing_version():
+    from routing.sap import elements as el
+    from routing.sap.screens import mm02
+    from routing.sap.session import SapError
+
+    versions = [("0001", "MF50-09 - L501330A B1"), ("0002", "SB25-3D3 - 5051070099 - D505107E B1"),
+                ("0003", "MF50-09 - L501330A B2")]
+    fake, sap, rows = _version_list_sap(versions)
+    mm02.delete_version(sap, "0002", "sb25-3d3 - 5051070099 - D505107E B1")      # case ignored
+    assert fake.focus == f"{el.VERSION_TABLE}/ctxt[{el.VERSION_COL},1]"          # cursor on row of 0002
+    assert [n for n, _ in rows] == ["0001", "0003"]
+
+    fake, sap, rows = _version_list_sap(versions)
+    with pytest.raises(SapError, match="has text"):
+        mm02.delete_version(sap, "0002", "something else B1")
+    assert ("press", el.VERSION_DELETE) not in fake.actions and len(rows) == 3   # nothing touched
+
+    fake, sap, rows = _version_list_sap(versions, delete_focused=False)          # SAP deletes row 0
+    with pytest.raises(SapError, match="removed 0001"):
+        mm02.delete_version(sap, "0002", versions[1][1])

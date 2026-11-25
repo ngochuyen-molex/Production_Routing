@@ -3,6 +3,7 @@ from routing.core.config import PLANT
 from routing.model.entities import RoutingKey
 from routing.sap import elements as el
 from routing.sap import table
+from routing.sap.screens.operations import fill_missing_setups, on_setup_check
 from routing.sap.session import SapError
 
 
@@ -98,12 +99,17 @@ def fill_header(sap, description, status="4"):
     counter = _counter(sap.get_text(el.HEADER_COUNTER))
     sap.set_text(el.HEADER_STATUS, status)
     sap.enter()
-    sap.pass_warnings("header")                 # UiPath mold / plt / stamping: second Enter here
+    if not on_setup_check(sap):                 # setup warning: filled by open_operations, not Enter-ed away
+        sap.pass_warnings("header")             # UiPath mold / plt / stamping: second Enter here
     return group, counter
 
 
 def open_operations(sap):
+    """Operation overview; first fills the setup of copied operations SAP stops on.
+    Returns the number of operations whose setup was filled."""
+    filled = fill_missing_setups(sap)
     if not sap.exists(el.OPERATION_TABLE):
         sap.press(el.BTN_OPERATIONS)
     if not sap.exists(el.OPERATION_TABLE):
         raise SapError(f"Operation overview not shown ({sap.where()})")
+    return filled
