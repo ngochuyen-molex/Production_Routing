@@ -14,7 +14,7 @@ Built: routing (create in CA01, inactivate in CA02), components (CA02) and produ
 ### Before every run
 
 1. Setup done once (section [Setup](#setup-once)), plus `pip install -e ".[sap]"` (pywin32 for SAP GUI scripting).
-2. In a new terminal: `cd C:\Users\nguyeb3\Downloads\ROUTING` and `.\.venv\Scripts\Activate.ps1`.
+2. In a new terminal: `cd C:\Users\nguyeb3\Downloads\ROUTING` and `C:\Users\nguyeb3\venvs\routing\Scripts\Activate.ps1` (venv location: see Setup).
 3. SAP GUI open and logged in (not needed for `--dry-run`).
 4. The request Excel file is **closed** - results are saved into it after every row; if it is open
    the run stops with "close it in Excel".
@@ -70,11 +70,16 @@ Design and status: [`docs/architecture.md`](docs/architecture.md); what is check
 ## Setup (once)
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
+py -m venv C:\Users\nguyeb3\venvs\routing
+C:\Users\nguyeb3\venvs\routing\Scripts\Activate.ps1
+pip install -e "C:\Users\nguyeb3\Downloads\ROUTING[sap,dev]"
 copy .env.example .env      # fill in the OpCenter SQL Server values
 ```
+
+**Venv location:** `C:\Users\nguyeb3\venvs\routing` (created 2026-11-25, Python 3.14).
+Not `ROUTING\.venv`: inside `Downloads`, `python.exe` and `Activate.ps1` were removed from
+`.venv\Scripts` (likely security software), which broke every command. The old `.venv` is unused.
+In every new terminal: `C:\Users\nguyeb3\venvs\routing\Scripts\Activate.ps1`, then `routing ...`.
 
 `pip install -e .` makes `routing` importable from any folder and adds the `routing` command.
 Snowflake uses the `default` connection from your Snowflake `connections.toml`.

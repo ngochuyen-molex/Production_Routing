@@ -1,6 +1,6 @@
 # Routing automation in Python - architecture (draft for review)
 
-Status: **routing, components and pv phases built, not yet run against SAP** (2026-11-17).
+Status: **routing, components and pv phases built and run against SAP on test rows** (2026-11-19); opc phase not built. Open items: `docs/verification.md`.
 Background, decisions and SAP facts: `README.md` (Background: replacing UiPath). UiPath behaviour being replaced: `docs/uipath_flows.md`.
 
 ## 0. Implementation status
@@ -184,7 +184,7 @@ routing run FILE --phase routing                  # only create / change / inact
 routing run FILE --phase components               # only component allocation
 routing run FILE --phase pv                       # only production versions
 routing run FILE --phase routing --phase pv       # several phases
-routing run FILE --only create                    # only rows with Action = Create
+routing run FILE --only add                       # only rows with Action = Add (also: delete, "assign components")
 routing run FILE --rows 5-12                      # only these Excel rows (for tests)
 ```
 
@@ -234,8 +234,8 @@ Steps per phase and action (✓ = the step applies; conditions in brackets):
 | opc | `AddTpm`, `AddWorkflow` | `DeleteTpm`, `InactivateWorkflow` | `UpdateTpmCycleTime` | - |
 
 Order inside a run: **all deletes first, then creates** (a resource / tool swap often has both for
-one material). Inside a Delete row: production versions first, then the routing (assumption,
-confirm against the UiPath order).
+one material). Inside a Delete row: the routing is inactivated first, then its production versions
+are deleted (phase order; section 0).
 
 ### 4.1 Component allocation is not a fixed follow-up of the routing phase
 
@@ -261,62 +261,65 @@ section 6.5). Nothing else changes.
 
 ## 5. Folders and files
 
-New folders are marked **new**; existing ones stay as they are.
+As built (2026-11-19). **new** = added for the SAP automation; *(planned)* = designed, not built.
+Visual view of the same tree: [`structure.html`](structure.html).
 
 ```
 src/routing/
-  cli.py                        + "run" command
+  cli.py                        routing run | check | opc | pre-uipath | list
   core/                         existing: config, Snowflake / SQL Server, Excel helpers
-  data/                         existing: SQL only (Snowflake)
+  data/                         existing: SQL only (Snowflake); + material.py (MARC status)
   checks/                       existing: stand-alone checks (still usable on their own)
   opc/                          existing: TPM / workflow file generators
 
   model/            new         plain data, no SAP, no Snowflake (section 5.1)
-    enums.py                    Action, Dept, OperationRole, Status
-    entities.py                 what exists in SAP: RoutingKey, Routing, Operation, ProductionVersion
-    requests.py                 what the user asks, one per Excel row: Request + one params class per action
+    enums.py                    Action, Dept, OperationRole, Status, PHASES
+    entities.py                 what exists in SAP: RoutingKey, Routing, Operation, ProductionVersion,
+                                MaterialRoutings, MaterialVersions + the shared rules (section 5.5)
+    requests.py                 what the user asks, one per Excel row: Request + CreateParams, AltBomChoice
     result.py                   StepResult
-    row_state.py                RowState: request + resolved entities + results
+    row_state.py                RowState: request + plan + results
 
   sap/              new         SAP GUI scripting only, no business rules
-    session.py                  connect, wait, status bar, popups, errors -> exceptions
+    session.py                  connect, status bar, warnings, popups, reset without saving
     elements.py                 every SAP element id in one place
+    table.py                    table cells, paging, find_row
     screens/
-      ca01.py                   initial screen, copy-from popups, header data
-      ca02.py                   open routing, group popup, header list (by group + counter)
-      operations.py             operation overview + operation details
+      ca01.py                   initial screen, copy-from popups, alt BOM, header data
+      ca02.py                   open routing, group popup, header list (by group + counter), inactivate, save
+      operations.py             operation overview + operation details, missing setup check
       components.py             component allocation, choose alternative BOM (by value)
-      mm02.py                   production version list + detail
+      mm02.py                   production version list: add, delete
 
   layouts/          new         production workflow types as data (section 5.2)
-    catalog.py                  LAYOUTS: one OperationLayout per type (MD, MD_SORTING, AS, PLT, STP, ...)
-    select.py                   layout_for(request, copy_source) -> the layout a row uses
+    catalog.py                  LAYOUTS: AS, PLT, STP, MD, MD_SORTING
+    select.py                   layout_for, description, operation_values, check_copy_source
 
-  departments.py    new         DEPARTMENTS: per Dept its layouts + OpCenter rules (section 5.3)
-  opc/rules.py      new         OpCenter rules per department (moved out of add_tpm.py)
+  resolve/          new         Snowflake rows -> entities (uses data/)
+    routings.py                 load / load_versions / load_alt_boms -> MaterialRoutings, MaterialVersions,
+                                active alt BOM numbers (data/bom.alt_bom_numbers); copy source, routing
+                                key and existing versions are entity methods (5.5)
 
-  resolve/          new         decisions taken from Snowflake before SAP is touched (uses data/)
-    routing_key.py              find group + counter of an existing routing
-    copy_source.py              which routing of the same material to copy from
-    alt_boms.py                 real active alt BOM numbers (not the count)
-    production_versions.py      versions that already exist
-
-  steps/            new         one class per SAP / file action
-    base.py                     Step (common interface)
-    routing.py                  CreateRouting, InactivateRouting (later ChangeCapacity, ChangeWorkCenter)
+  steps/            new         one class per SAP / file action: plan() + run()
+    base.py                     Step interface, Context (Snowflake + SAP session, caches)
+    routing.py                  CreateRouting, InactivateRouting
     components.py               AllocateComponents
     production_version.py       CreateProductionVersion, DeleteProductionVersion
-    opc.py                      AddTpm, AddWorkflow, DeleteTpm, InactivateWorkflow (wrap opc/)
 
-  pipeline/         new         planning + running
-    recipes.py                  PHASES order + RECIPES (Action -> steps per phase)
-    planner.py                  plan(rows) -> Plan sheet
-    runner.py                   run(file, phases, ...) -> executes, writes results
-    workbook.py                 read input rows, write plan / result columns, save after each row
+  pipelines/                    existing folder, new files for the run
+    run.py          new         plan rows, run phases, safe_run, RunSummary (planner + runner in one)
+    recipes.py      new         RECIPES (Action -> steps); PHASES order is in model/enums.py
+    workbook.py     new         read rows, RESULT_ columns, Plan + Run log sheets, save after each row
+    pre_uipath.py               existing
+
+  (planned) departments.py      DEPARTMENTS: per Dept its layouts + OpCenter rules (section 5.3)
+  (planned) opc/rules.py        OpCenter rules per department (moved out of add_tpm.py)
+  (planned) steps/opc.py        AddTpm, AddWorkflow, DeleteTpm, InactivateWorkflow (wrap opc/)
+  (planned) steps/routing.py    + ChangeCapacity, ChangeWorkCenter
 ```
 
 Import rule (as today, downward only):
-`cli -> pipeline -> steps -> (sap, layouts, resolve, opc) -> (data, model) -> core`.
+`cli -> pipelines -> steps -> (sap, layouts, resolve, opc) -> (data, model) -> core`.
 `sap/` never imports Snowflake code and `resolve/` never touches SAP, so each can be tested alone.
 
 `SAP_automation\change_bom` already has working code for CA02, component allocation and MM02. It
@@ -428,7 +431,7 @@ What is copied (source -> target):
 | `connect.py` (`get_session`) | `sap/session.py` | connect, wait, status bar, popups |
 | `routing.py` (`open_routing`, `select_group`, `open_header_row`, `find_row`, `get_cell_text`) | `sap/screens/ca02.py` | open by group + counter, page through tables |
 | `routing.py` (component allocation, choose alt BOM by value) | `sap/screens/components.py` | find alt BOM row by value (col 19), assign components |
-| `production_version.py` (open material, read versions, next number, enter, save, popups) | `sap/screens/mm02.py` | without the Excel / skip-previous logic, which goes to `steps/` and `pipeline/` |
+| `production_version.py` (open material, read versions, next number, enter, save, popups) | `sap/screens/mm02.py` | without the Excel / skip-previous logic, which goes to `steps/` and `pipelines/` |
 | element ids used in the files above | `sap/elements.py` | one place |
 
 Not copied: `models.py`, `workbook.py`, `reader.py`, `config.py`, `routing_main.py`, `routing_sf.py`,
@@ -527,311 +530,182 @@ Built differently from the sketch above: `Routing.fits(layout)` stays in
 takes a `fits` function instead of the layout. `OperationValue` (the to-type list) moved from
 `model/entities.py` to `layouts/select.py`, because it is not something that exists in SAP.
 
-## 6. Skeleton
+## 6. Skeleton (as built)
 
-Signatures and structure only - bodies are the work of the implementation phase.
+Key signatures as they are in the code (2026-11-19); bodies: see the files. Updated from the
+original design skeleton - differences are noted under each part.
 
 ### 6.1 `model/` - enums, entities, requests
 
 ```python
 # model/enums.py
 class Action(str, Enum):
-    CREATE = "Create"
+    CREATE = "Add"                  # file wording; "Create" accepted as an alias
     DELETE = "Delete"
+    ASSIGN = "Assign Components"    # existing routing (UiPath main_bom_assignment)
     # later: CHANGE_CAPACITY, CHANGE_WORK_CENTER, RENAME
 
+class Dept(str, Enum):        MD, AS, PLT, STP
+class OperationRole(str, Enum): PRODUCTION, TOOL, SORTING, FINAL   # same vocabulary as checks/operation_values
+class Status(str, Enum):      DONE, SKIPPED, FAILED
+PHASES = ("routing", "components", "pv", "opc")
 
-class Dept(str, Enum):
-    MD = "MD"
-    AS = "AS"
-    PLT = "PLT"
-    STP = "STP"
+# model/entities.py - what exists in SAP (Snowflake or the SAP screen) + the shared rules (5.5)
+RoutingKey(material, group, counter)
+Operation(number, control_key, work_center, base_quantity)
+Routing(key, description, status, deleted, operations)
+    .matches(resource, *texts)    .operation(role)    .has_sorting    .is_trial    .can_be_copied_for(resource)
+MaterialRoutings(material, routings)
+    .get(key)    .matching(resource, *texts)    .copy_source(fits, resource, needs_sorting, sorting)    .group_size(group)
+ProductionVersion(material, version, routing, alt_bom, text, locked)    .text_for(routing, alt_bom)
+MaterialVersions(material, versions)    .on(key)    .has(key, alt_bom)    .missing(key, alt_boms)    .next_number()
 
-
-class OperationRole(str, Enum):        # same vocabulary as checks/operation_values.py
-    PRODUCTION = "production"
-    TOOL = "tool"
-    SORTING = "sorting"
-    FINAL = "final"
-
-
-# model/entities.py - what exists in SAP (from Snowflake or read from the SAP screen)
-@dataclass(frozen=True)
-class RoutingKey:
-    material: str
-    group: str                          # PLNNR, e.g. "M5013300"
-    counter: str                        # PLNAL without leading zeros, e.g. "34"
-
-
-@dataclass(frozen=True)
-class Operation:
-    number: str                         # VORNR, e.g. "0020"
-    control_key: str                    # STEUS, e.g. "PP01"
-    work_center: str
-    base_quantity: float | None = None
-
-
-@dataclass(frozen=True)
-class Routing:
-    key: RoutingKey
-    description: str = ""               # KTEXT
-    status: str = ""                    # STATU: "4" production, "1" inactive
-    deleted: bool = False               # DELKZ = X
-    operations: tuple[Operation, ...] = ()
-
-
-@dataclass(frozen=True)
-class ProductionVersion:
-    material: str
-    version: str                        # VERID, e.g. "0004"
-    routing: RoutingKey
-    alt_bom: int                        # STLAL
-    text: str = ""                      # e.g. "MF50-09 - L501330A B1"
-    locked: bool = False
-
-
-# model/requests.py - what the user asks; common part + one params class per action
-@dataclass(frozen=True)
-class AltBomChoice:
-    """'ALL BOM' -> all=True; '2' -> number=2."""
-    all: bool = False
-    number: int | None = None
-
-
-@dataclass(frozen=True)
-class CreateParams:
-    capacity: float
-    tool_cavity: int | None = None
-    efficiency: float | None = None
-    utilization: float | None = None
-    sorting: str = ""
-    sorting_capacity: float | None = None
-    alt_bom: AltBomChoice = AltBomChoice(number=1)
-    assign_components: bool = True
-
-
-@dataclass(frozen=True)
-class DeleteParams:
-    pass                                # the routing is identified by material / resource / tool / key
-
-
-# later: ChangeCapacityParams(capacity_after), ChangeWorkCenterParams(resource_before, resource_after),
-#        RenameParams(new_description)
-
-
-@dataclass(frozen=True)
-class Request:
-    excel_row: int
-    action: Action
-    dept: Dept
-    material: str
-    resource: str
-    tool: str = ""
-    key: RoutingKey | None = None       # group / group counter given in the file (override / later phases)
-    params: CreateParams | DeleteParams | None = None
-
-
-PARAM_READERS = {Action.CREATE: read_create_spec, Action.DELETE: read_delete_spec}   # action -> parser
-
-
-def request_from_row(excel_row: int, values: dict) -> Request:
-    """Common columns + PARAM_READERS[action](values). Raises InputError with a readable message
-    (e.g. 'Capacity missing for Create')."""
+# model/requests.py - one Request per Excel row; one params class per action
+AltBomChoice(all, number)                              .parse("ALL BOM" | "2" | "B2" | blank -> 1)
+CreateParams(capacity, tool_cavity, efficiency, utilization, sorting, sorting_capacity, alt_bom, assign_components)
+DeleteParams()
+AssignParams(sorting, alt_bom, assign_components)
+Request(excel_row, action, dept, material, resource, tool, key, copy_from, params)
+request_from_row(excel_row, values) -> Request          # InputError -> RESULT_INPUT
 ```
+
+Differences from the design: `Action.ASSIGN` + `AssignParams` added (2026-11-18); `Request.copy_from`
+(the `COPY_FROM_GROUP` / `_GC` override); the matching / copy-source rules are entity methods instead
+of separate `resolve/` modules.
 
 ### 6.2 `model/row_state.py` - what flows through the phases
 
 ```python
 @dataclass
-class Plan:
-    steps: list[str]                                 # e.g. ["CreateRouting", "AllocateComponents"]
-    layout: str = ""                                 # layout id, e.g. "MD_SORTING"
-    copy_from: Routing | None = None                 # create: routing of the same material to copy
-    alt_boms: list[int] = field(default_factory=list)            # real active alt BOM numbers
-    existing_versions: list[ProductionVersion] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
+class Plan:                                  # decided before SAP is touched (Snowflake only)
+    steps: list[str]
+    layout: str                              # e.g. "MD_SORTING"
+    copy_from: Routing | None                # create: routing of the same material to copy
+    target: Routing | None                   # the routing the row works on (existing or just created)
+    alt_boms: list[int]                      # pv: alt BOMs that still need a version
+    component_alt_boms: list[int]            # components: alt BOMs to allocate
+    existing_versions: list[ProductionVersion]
+    warnings: list[str]
+    skip: dict[str, str]                     # step name -> reason: written as Skipped, not run
+    errors: dict[str, str]                   # step name -> planning error: Failed, retried next run
 
 @dataclass
 class RowState:
-    request: Request                                 # frozen: what the user asked
-    plan: Plan | None = None                         # decided before SAP (Snowflake)
-    key: RoutingKey | None = None                    # target routing: file, Snowflake or SAP screen
-    created_versions: list[ProductionVersion] = field(default_factory=list)   # filled by the pv phase
-    results: dict[str, StepResult] = field(default_factory=dict)              # step name -> result
-
-    def done(self, step_name: str) -> bool:
-        result = self.results.get(step_name)
-        return result is not None and result.status in (Status.DONE, Status.SKIPPED)
+    request: Request
+    plan: Plan
+    key: RoutingKey | None                   # target routing: file, Snowflake or SAP screen
+    results: dict[str, StepResult]           # step name -> result
+    def done(step_name) -> bool              # Done or Skipped
+    def has_failed() -> bool
 ```
 
 ### 6.3 `steps/base.py` - the one interface every step follows
 
 ```python
 class Step:
-    name: str          # result column via workbook.RESULT_COLUMNS, e.g. "CreateRouting" -> RESULT_ROUTING
+    name: str          # result column via pipelines/workbook.RESULT_COLUMNS, e.g. CreateRouting -> RESULT_ROUTING
     phase: str         # "routing" | "components" | "pv" | "opc"
-    needs_sap: bool = True
+    def applies(self, row) -> bool            # does the step belong to the row (e.g. no components for PLT)
+    def plan(self, row, ctx) -> None          # Snowflake only; reason in row.plan.skip[self.name] to skip
+    def run(self, row, ctx) -> StepResult     # SAP / files; Save only as the last action
 
-    def applies(self, row: RowState) -> bool:
-        """Does this step belong to the row at all? (e.g. AllocateComponents: not for PLT)"""
-        return True
-
-    def plan(self, row: RowState, ctx: "Context") -> None:
-        """Snowflake lookups only; fill row.plan (copy source, alt BOMs, ...). No SAP."""
-
-    def run(self, row: RowState, ctx: "Context") -> StepResult:
-        """Do the work in SAP / files. Must check its own start screen and leave SAP on a known screen."""
-        raise NotImplementedError
+class Context:     # shared resources of one run; Snowflake and SAP opened only when first used
+    sf, sap                                   # sap raises in --dry-run
+    routings(material), versions(material), alt_boms(material), material_status(material)   # cached
 ```
-
-`Context` holds the shared resources of one run: the SAP session (opened only when a SAP step
-runs), the Snowflake connection, plant, today's date, the `--dry-run` flag.
 
 ### 6.4 A step, e.g. `steps/production_version.py`
 
 ```python
 class CreateProductionVersion(Step):
     name, phase = "CreateProductionVersion", "pv"
-
-    def applies(self, row):
-        return row.request.action is Action.CREATE
-
+    def applies(self, row):  return row.request.action is Action.CREATE
     def plan(self, row, ctx):
-        row.plan.alt_boms = resolve.alt_boms.for_request(ctx.sf, row.request)      # [2] or [1, 2, 3]
-        row.plan.existing_versions = resolve.production_versions.on_routing(ctx.sf, row.key)
-
+        wanted = ctx.alt_boms(material) if ALL BOM else [number]
+        plan.existing_versions = ctx.versions(material).on(routing.key)
+        plan.alt_boms = ctx.versions(material).missing(routing.key, wanted)   # never a duplicate
     def run(self, row, ctx):
-        mm02 = screens.mm02.open_versions(ctx.sap, row.request.material)
-        created = []
-        for alt_bom in row.plan.alt_boms:
-            if mm02.has_version(row.key, alt_bom):
-                continue                                                              # no duplicates
-            created.append(mm02.add_version(row.key, alt_bom, text=version_text(row, alt_bom)))
-        mm02.save()
-        return StepResult.done(f"created {', '.join(created) or 'none (all existed)'}")
+        mm02.open_versions -> read_versions -> add_version per alt BOM (next number) -> close_and_save
+
+class DeleteProductionVersion(Step):          # versions of the routing (group + counter) from Snowflake
+    def run(self, row, ctx):
+        mm02.delete_version(sap, version, expected_text)   # by number, text checked, cursor on the row,
+                                                            # only that version may disappear
 ```
 
-### 6.5 `pipeline/recipes.py` - the only place that decides "which steps"
+### 6.5 `pipelines/recipes.py` - the only place that decides "which steps"
 
 ```python
-PHASES = ["routing", "components", "pv", "opc"]
-
 RECIPES = {
-    Action.CREATE: [CreateRouting(), AllocateComponents(), CreateProductionVersion(),
-                    AddTpm(), AddWorkflow()],
-    Action.DELETE: [DeleteProductionVersion(), InactivateRouting(),
-                    DeleteTpm(), InactivateWorkflow()],
-}
+    Action.CREATE: [CreateRouting(), AllocateComponents(), CreateProductionVersion()],
+    Action.DELETE: [InactivateRouting(), DeleteProductionVersion()],
+    Action.ASSIGN: [AllocateComponents()],
+}   # opc steps (AddTpm, AddWorkflow, DeleteTpm, InactivateWorkflow): not built
 
-
-def steps_for(row: RowState, phases: list[str]) -> list[Step]:
-    """Steps of the row's action, in phase order, filtered by --phase and Step.applies()."""
+def steps_for(row, phases=PHASES, recipes=RECIPES) -> list[Step]   # phase order, --phase, Step.applies()
+def earlier_failed(row, step, recipes) -> bool                     # later phases of a failed row wait
 ```
+
+Difference from the design: Delete runs `InactivateRouting` before `DeleteProductionVersion` (phase order).
 
 ### 6.6 `layouts/` - production workflow types as data
 
 ```python
 # layouts/catalog.py
-@dataclass(frozen=True)
-class OperationSlot:
-    role: OperationRole
-    row: int                          # row in the operation overview table
-    work_center: str                  # source: "resource" | "tool" | "sorting" | "keep" (from copy source)
-    base_qty: str | None = None       # formula: "capacity" | "capacity_x_cavity" | "sorting_capacity" | None
-    details: tuple[str, ...] = ()     # Operation Details fields to set: "efficiency", "utilization",
-                                      # "cavity", "setup", "op_text"
-
-
-@dataclass(frozen=True)
-class OperationLayout:
-    id: str                           # "MD", "MD_SORTING", "AS", "PLT", "STP"
-    description: str                  # routing text, e.g. "{resource} - {material} - {tool}"
-    slots: tuple[OperationSlot, ...]
-    allocate_components: bool = True
-
-    def slot(self, role: OperationRole) -> OperationSlot: ...
-    def roles_with_capacity(self) -> list[OperationSlot]: ...   # used by ChangeCapacity
-
-
-LAYOUTS: dict[str, OperationLayout] = {
-    "AS":  OperationLayout("AS",  "{resource} - {material}", (...)),
-    "PLT": OperationLayout("PLT", "{resource} - {material} - {tool}", (...), allocate_components=False),
-    "STP": OperationLayout("STP", "{resource} - {material} - {tool}", (...)),
-    "MD":  OperationLayout("MD",  "{resource} - {material} - {tool}", (...)),
-    "MD_SORTING": OperationLayout("MD_SORTING", "{resource} - {tool} - {sorting}", (...)),
-}
-
+OperationSlot(role, row, work_center="keep", base_qty=None, details=())
+    # work_center: "resource" | "tool" | "sorting" | "keep"; base_qty: "capacity" | "capacity_x_cavity" |
+    # "sorting_capacity" | None; details: ((field, formula), ...), fields: op_text, base_qty, cavity,
+    # efficiency, utilization, setup
+OperationLayout(id, description, slots, allocate_components=True, verified=False)
+    .slot(role)    .roles()    .slots_with_capacity()          # the last one for a future ChangeCapacity
+LAYOUTS = {"AS", "PLT" (no components), "STP", "MD", "MD_SORTING"}   # rows: verification.md I.2
 
 # layouts/select.py
-def layout_for(request: Request, copy_source: Routing | None = None) -> OperationLayout:
-    """Department + request features -> layout; e.g. MD with sorting -> MD_SORTING."""
-
-
-def check_copy_source(layout: OperationLayout, copy_source: Routing) -> list[str]:
-    """Warnings when the copied routing does not have the operations the layout expects."""
+layout_for(request) -> OperationLayout                        # MD + sorting -> MD_SORTING
+description(layout, request) -> str                            # blank parts left out, max 40 characters
+operation_values(layout, request) -> list[OperationValue]      # what CreateRouting types, row by row
+missing_inputs(layout, request) -> list[str]
+check_copy_source(layout, routing) -> list[str]                # warnings: sorting / final step not where expected
 ```
 
-Row numbers and fields come from `docs/uipath_flows.md` section 4.2 and must be confirmed on a
-real SAP screen (row base). Steps only ask for roles, e.g. a change capacity step:
+Difference from the design: `description` is a tuple of parts, not a format string; detail
+fields carry their formula.
+
+### 6.7 `pipelines/run.py` - the backbone
 
 ```python
-for slot in layout.roles_with_capacity():
-    overview.set_base_quantity(slot.row, formulas[slot.base_qty](row.request))
+def run(path, phases=PHASES, only=None, rows=None, dry_run=False, slow=False, sheet=None) -> RunSummary:
+    book = RequestWorkbook(path, sheet)              # input rows + previous RESULT_ columns
+    states, invalid = parse_rows(book.rows(), only, rows)   # deletes first
+    plan_rows(states, ctx, phases)                   # Snowflake only; E3 material -> every step skipped
+    book.write_plan(states, invalid)                 # Plan sheet
+    if not dry_run:
+        execute(states, book, ctx, summary, phases)  # phase by phase, all rows; save after every row
+
+def safe_run(step, row, ctx) -> StepResult
+    # error -> SAP screen + status bar into the message -> reset (popups closed, /n, leave WITHOUT
+    # saving; a save question is answered No) -> Failed; only a failed reset stops the run (RunAborted)
 ```
 
-### 6.7 `pipeline/runner.py` - the backbone
-
-```python
-def run(path, phases=PHASES, only=None, rows=None, dry_run=False):
-    book = workbook.open(path)                        # input rows + existing result columns
-    states = book.row_states(only=only, rows=rows)    # Request + key + previous results per row
-    states = order_deletes_first(states)
-
-    with Context.open(dry_run=dry_run) as ctx:        # Snowflake now, SAP only when needed
-        # 1. plan: Snowflake only
-        for row in states:
-            row.plan = Plan(steps=[s.name for s in steps_for(row, phases)])
-            for step in steps_for(row, phases):
-                step.plan(row, ctx)
-        book.write_plan(states)                       # Plan sheet
-        if dry_run:
-            return book.save()
-
-        # 2. act, phase by phase (all rows in phase 1, then all rows in phase 2, ...)
-        for phase in PHASES:
-            if phase not in phases:
-                continue
-            for row in states:
-                for step in steps_for(row, [phase]):
-                    if row.done(step.name) or row.failed_before(step):
-                        continue                      # rerun-safe; later steps of a failed row are skipped
-                    row.results[step.name] = safe_run(step, row, ctx)   # exceptions -> Failed + message
-                    book.write_result(row, step)
-                book.save()                           # after every row
-    return book
-```
+Difference from the design: planner and runner are one module (`pipelines/run.py`), not
+`pipeline/planner.py` + `runner.py`.
 
 Why phase by phase and not row by row: SAP stays in one transaction per phase (CA01 for all
-creates, then MM02 for all versions), which is faster and mirrors how you run UiPath today. The
-`opc` phase runs last and builds **one** TPM file and **one** workflow file from the rows whose SAP
-steps succeeded.
+creates, then MM02 for all versions), which is faster and mirrors how UiPath is run today.
 
-`safe_run` catches SAP errors, takes the status bar text into the message, sends SAP back to a
-known screen (`/n`) and marks the step `Failed`, so one bad row never stops the whole run.
-
-### 6.8 `cli.py` - new command
+### 6.8 `cli.py` - `routing run`
 
 ```python
-run = sub.add_parser("run", help="plan + run routing requests (create / delete / ...)")
 run.add_argument("file", nargs="?")
 run.add_argument("--phase", action="append", choices=PHASES)
-run.add_argument("--only", choices=[a.value.lower() for a in Action])
-run.add_argument("--rows", help="e.g. 5-12")
+run.add_argument("--only", choices=[a.value.lower() for a in Action])    # add | delete | "assign components"
+run.add_argument("--rows")                                               # 5-12 or 5,7,9
 run.add_argument("--dry-run", action="store_true")
+run.add_argument("--slow", action="store_true")
+run.add_argument("--sheet")
 ```
 
-## 7. Excel input / output (proposal)
+## 7. Excel input / output (as built)
 
 Input columns (one sheet, one row per request): `Action`, `Dept`, `Material`, `Resource`, `Tool`,
 `Capacity`, `Tool Cavity`, `Efficiency`, `Utilization`, `Sorting/ Lubricant`,
@@ -843,7 +717,7 @@ Written back:
 | Columns | Written by |
 |---|---|
 | `group`, `group counter` | routing phase (from the SAP screen) or the planner (Snowflake) |
-| `PLAN_STEPS`, `COPY_FROM_GROUP`, `COPY_FROM_GC`, `PLAN_WARNINGS` | planner |
+| `COPY_FROM_PLANNED` (information only) | planner; the user may fill `COPY_FROM_GROUP` / `COPY_FROM_GC` as an override (never written by the tool) |
 | `RESULT_ROUTING`, `RESULT_COMPALLOC`, `RESULT_MM02` (`Done` / `Skipped: ...` / `Failed: ...`), `RESULT_INPUT` | each step, see 7.1 |
 | sheet **Plan** | planner, one row per request + its planned steps |
 | sheet **Run log** | runner, one row per step run: time, row, step, status, message |
@@ -887,16 +761,18 @@ Differences from UiPath, on purpose:
 - the UiPath `progress` column is left as it is and ignored; rows already done by UiPath are
   recognised by the planner instead ("routing already exists", "versions exist").
 
-## 8. Build order
+## 8. Build order (status 2026-11-19)
 
-1. `model/`, `pipeline/` (recipes, planner, runner, workbook) with fake steps: `--dry-run` works end to end.
-2. `sap/session.py` + `sap/screens/mm02.py` (copied from `SAP_automation`, section 5.4) + production version
-   steps: first real phase.
-3. `sap/screens/ca02.py` + `components.py` + `AllocateComponents`, `InactivateRouting`.
-4. `layouts/` + `sap/screens/ca01.py` + `operations.py` + `CreateRouting`, one department at a time.
-5. `opc` steps wrapping the existing generators.
-6. Later: change capacity / work center, rename routing / production version, new BOM for
-   plating (`CreateBom`, CS01, section 4.1).
+| # | Step | State |
+|---|---|---|
+| 1 | `model/`, `pipelines/` (run, recipes, workbook) with fake steps; `--dry-run` end to end | done |
+| 2 | `sap/session.py` + `screens/mm02.py` + production version steps | done; create run live, delete fix (row by cursor) not run live yet |
+| 3 | `screens/ca02.py` + `components.py` + `AllocateComponents`, `InactivateRouting` | done, run live |
+| 4 | `layouts/` + `screens/ca01.py` + `operations.py` + `CreateRouting` | done; AS, PLT, STP, MD run live, layouts not marked verified; C_AUTO assembly layout open |
+| 5 | `opc` steps wrapping the existing generators | not built (run `routing opc ...` separately) |
+| 6 | Later: change capacity / work center, rename, new BOM for plating (`CreateBom`, CS01, 4.1) | backlog |
+
+Open items per step: `docs/verification.md` (the only checklist).
 
 ## 9. Open points
 

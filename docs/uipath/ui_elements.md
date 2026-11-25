@@ -106,8 +106,8 @@ Excel column names are in `"quotes"`.
 | Create Using Copy Function: Select Object to be Copied (popup) | `wnd[1]/usr/ctxt[0]` | type | material to copy from (= same material) |
 | | `wnd[1]/usr/ctxt[1]` | type | `1901` |
 | | `wnd[1]/tbar[0]/btn[0]` | click | continue |
-| Entry Option: Group (copy list) | `wnd[1]/usr/tblSAPLCPSLTCTRL_2120` | read table | columns incl. Status, Description |
-| | `wnd[1]/usr/tblSAPLCPSLTCTRL_2120/txt[2,row]` | double-click | routing to copy, see flows 3.2 |
+| Entry Option: Group (copy list, "TL Groups") | `wnd[1]/usr/tblSAPLCPSLTCTRL_2120` | read table | **recorded 2026-11-19**: col 0 Group `ctxt` (first row of each group only), 1 GCt `txt`, then Frm / To Lot Size, Unit, Status, Usage, 7 Description `txt` |
+| | `wnd[1]/usr/tblSAPLCPSLTCTRL_2120/txt[7,row]` | double-click | routing to copy, see flows 3.2 (UiPath selector says `tableCol='2'`; the scripting column is **7**) |
 | Choose Alternative BOM (popup) | `wnd[1]/usr/sub/1/txt[row,8]` | double-click | alt BOM row = `"Alt Bom" - 1` (0 for blank / `ALL BOM`) |
 | Create Routing: Header Data Check | `wnd[0]/usr/sub/2/txt[1]` | type | routing description, per department (flows 4.1) |
 | | `wnd[0]/usr/sub/2/ctxt[0]` | read | group -> `"group"` |
@@ -190,3 +190,23 @@ Excel column names are in `"quotes"`.
 | | `wnd[2]/usr/btn` | click | Check |
 | | `wnd[2]/tbar[0]/btn[12]`, `btn[0]` | click | cancel (red cross), continue |
 | Change Material ... | `wnd[0]/tbar[0]/btn[11]` | click | Save |
+
+---
+
+## 4. Elements added in the Python version (not in the UiPath project)
+
+Not in the UiPath XAML, so `tools/uipath_catalog.py` does not produce them and `ui_elements.csv`
+does not list them. Keep this table up to date whenever Python starts using a new screen or element.
+Constants: `src/routing/sap/elements.py`.
+
+| Added | Transaction / screen | ID | Action | Value / meaning | Code | Status |
+|---|---|---|---|---|---|---|
+| 2026-11-18 | CA01 "Create Routing: Operation - Check" (title, `TITLE_OPERATION_CHECK`) | `wnd[0]` title + `wnd[0]/sbar` text "Enter standard value Setup" (`SETUP_MISSING_TEXT`) | detect | SAP stops here after an Enter of the operation entry (after the header, after the work centers, in Operation Details) when an operation has no setup (e.g. AS `C_AUTO` MP03) | `operations.on_setup_check` | seen live (screenshot, material 2257251200) |
+| 2026-11-18 | same screen, Standard Values, Setup | `wnd[0]/usr/sub/3/txt[6]` (`DETAIL_SETUP`, same id as Operation Details) | type if blank | `1` (`SETUP_DEFAULT`) | `operations.fill_missing_setups` | id assumed same as Operation Details - verify live |
+| 2026-11-18 | same screen, Setup unit (`Un`) | **no fixed id**: found at run time = field on the same line as `DETAIL_SETUP`, nearest to its right | type if blank | `H` (`SETUP_DEFAULT_UNIT`) | `operations._setup_unit_field` | record the real id (likely `wnd[0]/usr/sub/3/ctxt[...]`) and replace the position search |
+| 2026-11-18 | same screen | `wnd[0]` Enter | key | next operation / operation overview; repeated max 20 times | `operations.fill_missing_setups` | |
+| 2026-11-18 | any (after `/n` in `SapSession.reset`): exit popup | text of `wnd[1]` (title + `wnd[1]/usr` children) | read | decides the answer: `\bsave\b` -> No, `lost` / `exit editing` -> Yes, other -> run stops | `SapSession.popup_text`, `reset` | button ids standard SAP, verify the texts live |
+| 2026-11-18 | same popup, first button | `wnd[1]/usr/btnSPOP-OPTION1` (`POPUP_YES`) | click | only for "data will be lost / exit editing" = leave **without** saving | `SapSession.reset` | id from the earlier code, not in UiPath |
+| 2026-11-18 | same popup, second button | `wnd[1]/usr/btnSPOP-OPTION2` (`POPUP_NO`) | click | for a save question ("Save changes?") = do **not** save | `SapSession.reset` | standard SAP id, verify live |
+| 2026-11-19 | MM02 Production Version Overview (`wnd[1]`) | `wnd[1]/usr/tblSAPLMDIAT_MKAL_NEW/txt[1,row]` (`VERSION_TEXT_COL = 1`) | read | version text, compared with the Snowflake text before a delete | `mm02.delete_version` | from `SAP_automation` `production_version_fix` (`TEXT_COL`) and UiPath `tableCol='1'`; verify live |
+| 2026-11-19 | same list | version cell `.../ctxt[0,row]` (or `txt`) of the found row | **setFocus** before Delete | Delete acts on the row under the cursor; before only `getAbsoluteRow().selected` was set and SAP deleted the **first** row (seen live) | `mm02.delete_version` | fix not run live yet |

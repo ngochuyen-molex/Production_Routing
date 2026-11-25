@@ -22,14 +22,31 @@ Nothing has been run against real SAP yet.
 - [ ] Material status S1 / S2 on a real SAP screen: confirm they only give a warning (test rows 11-13
       of `add_routing_test.xlsx`); an error message would make the step Failed instead
 - [x] MM02 delete version: button `btn[14]`, no confirmation popup; unexpected popup -> stop (2026-11-18)
+- [x] **MM02 delete picks the routing's version, not the first row** (bug seen live 2026-11-19: only
+      the row was ticked, SAP deleted the row under the cursor = row 0). Now (`mm02.delete_version`):
+      row found by the version number Snowflake has for the routing's group + group counter; its text
+      must equal the Snowflake text, else nothing is touched; cursor put on that row's cell + row
+      ticked, then Delete; afterwards exactly that version must be gone, else Failed and SAP is left
+      **without saving** (a delete only counts at Save). Test
+      `test_delete_version_deletes_exactly_the_routing_version` (2026-11-19)
+- [ ] MM02 delete fix on a real SAP screen; check the materials of the earlier delete run in MM02 /
+      Snowflake for a wrongly deleted version
+- [x] CA01 "Create Routing: Operation - Check" right after the header Enter (status "Enter standard
+      value Setup", copied operation without setup, e.g. AS `C_AUTO` MP03): blank setup `sub/3/txt[6]`
+      -> `1`, blank unit (field right of setup, found by position) -> `H`, Enter, per operation (max 20)
+      until the operation overview; the header no longer Enter-s this warning away; not reported in the result; see I.4 (2026-11-18)
+- [x] Setup check after the header on a real SAP screen: AS `C_AUTO1` rows, 3 operations filled (2026-11-19)
+- [ ] Setup check after the **work-center Enter** on a real SAP screen: rerun row 2 of `add_routing_test - Copy.xlsx` (STP 5051070099)
+- [x] Error handling: status bar logged before the reset; reset leaves without saving (save question -> No, data lost -> Yes, unknown popup -> run stops); Save never pressed for a failed step; see I.5 (user requirement, 2026-11-18)
+- [ ] Exit popup texts on a real SAP screen (CA01, CA02, MM02): confirm they match the save / lost patterns
 - [x] All element ids match the UiPath selectors (`docs/uipath/ui_elements.csv`) (2026-11-18)
-- [ ] Copy list 2120 group / counter columns (0 / 1) - record with the SAP GUI script recorder
+- [x] Copy list 2120 recorded (material 5051070099): group `ctxt[0,row]` (first row of each group only), GCt `txt[1,row]`, description `txt[7,row]` = the double-clicked cell; description was `2` from UiPath, corrected to `7` (2026-11-19)
 - [ ] BOM popup AltBOM column 19 (SAP_automation) vs 8 (UiPath) - record
 - [ ] F12 after the production version Check: wnd[2] or wnd[3] - record
 - [ ] Operation overview row numbers per layout (`architecture.md` 6.6) - first live routing per layout
 - [ ] First live run: one row with `routing run FILE --rows N --slow`
 
-### Business rules (details: C, D, E, F, H)
+### Business rules (details: C, D, E, F, H, I)
 - [x] Copy source: same material, status 4, not flagged; normal resource -> never a TRIAL / MDTRIAL
       routing, trial resource -> only a trial routing (2026-11-17, trial resource rule 2026-11-18)
 - [x] Copy source has the same sorting shape as the request - YMHI step from the **operations**,
@@ -43,6 +60,10 @@ Nothing has been run against real SAP yet.
 - [x] ALL BOM creates only the missing production versions (real active alt BOM numbers) (2026-11-17)
 - [x] BOM allocation follows `SAP_automation` (same screens, two passes 0030 / 0020); a number =
       that alt BOM only, ALL BOM = every active alt BOM; see F (2026-11-18)
+- [x] Missing setup on a copied operation (CA01 "Operation - Check" after the header): setup =
+      `1`, unit = `H`, only where blank, every operation SAP stops on; see I.4 (user rule, 2026-11-18)
+- [x] Operation layout per department (rows, work centers, base qty, Operation Details incl. setup
+      for MD) written down in one place; see I.2 / I.3 (2026-11-18)
 - [ ] Delete order inside a row (routing inactivated first, then versions deleted) - confirm on SAP
 - [ ] Packaging -> 0030 also in sorting routings (0030 = YMHI, not the pack step) - confirm
 - [ ] More workflow types than AS, PLT, STP, MD, MD_SORTING (AS / STP with sorting, hi-coat,
@@ -102,6 +123,7 @@ Each case has a fake-SAP test in `tests/test_routing_run.py`.
 | | copy list 2120 -> pick by group + counter (UiPath: first status-4 non-TRIAL, YMHI in name when sorting) | done |
 | | none of them -> SAP copied the only routing and went on (BOM popup / header) | only when the material has 1 routing, else error |
 | CA01 / components alt BOM (`ca01.choose_alt_bom`) | "Choose Alternative BOM" -> row by AltBOM value, usage must be 1; not shown -> header | done |
+| CA01 after the header, after the work centers, in Operation Details (`operations.fill_missing_setups`) | "Operation - Check" / "Enter standard value Setup" -> setup `1` + unit `H`, Enter, per operation; screens during the operation entry: see **I** | done (fake SAP), live open |
 | CA01 / CA02 / MM02 first screen (`SapSession.check_initial`) | E3 rows never get here (skipped while planning); `E3` (as a word) or `NOT EXIST` in the status bar -> step **Skipped** (`SapSkip`); any other W message, incl. material status S1 / S2 -> extra Enter (max 2) | done |
 | MM02 delete version (`mm02.delete_version`) | no confirmation popup in UiPath; any popup -> stop with its text | done |
 
@@ -116,7 +138,7 @@ Ids: `src/routing/sap/elements.py` (the only place). Sources: `docs/uipath/ui_el
 (`wnd[2]` for production version details).
 
 - All ids match. Confirmed from UiPath: `VERSION_DELETE = wnd[1]/tbar[0]/btn[14]` (4 flows).
-- Still `VERIFY` (record): `COPY_LIST_GROUP_COL` / `COPY_LIST_COUNTER_COL` (UiPath reads 2120 by
+- Recorded 2026-11-19: copy list 2120 = group `ctxt[0]`, GCt `txt[1]`, description `txt[7]` (UiPath's `tableCol='2'` is not the scripting column). Still `VERIFY` (record): (formerly also `COPY_LIST_GROUP_COL` / `COPY_LIST_COUNTER_COL`; UiPath reads 2120 by
   header name), `BOM_POPUP_ALT_COL` (19 from SAP_automation, UiPath clicks col 8),
   `PV_CANCEL_CHECK` (SAP_automation presses F12 on wnd[2]; the UiPath scope could be a wnd[3] check popup).
 - Not ported on purpose: `delete_routing` (MatAssignment), `delete_all_pd`, `delete_pd_textdesc`,
@@ -320,3 +342,89 @@ touched. None -> `Skipped: no production version on G/C`.
    which lags SAP. Too early -> `Skipped: routing not found` / `no production version` (safe, run
    again later).
 4. Delete = deletion flag + status 1 (not a hard delete; the flag can be unticked).
+
+## I. CA01 operations: what each department types, and the screens SAP may stop on
+
+One section for everything between the header and Save in `CreateRouting.run`
+(`steps/routing.py`): the per-department operation layout and the screens SAP can put in between.
+Layouts: `src/routing/layouts/catalog.py` (`LAYOUTS`); screens: `sap/screens/ca01.py`,
+`sap/screens/operations.py`; element ids: `docs/uipath/ui_elements.md` (3.1 and 4).
+
+### I.1 Sequence after the header
+
+| # | Screen | What happens | Code |
+|---|---|---|---|
+| 1 | Header Data Check / Header Details | description, read group + counter, status `4`, Enter; a W warning gets one more Enter - **except** the setup warning (I.4) | `ca01.fill_header` |
+| 2 | **Operation - Check** (only if a copied operation has no setup) | setup `1` + unit `H` per operation, Enter, until SAP moves on (I.4) | `operations.fill_missing_setups` (from `ca01.open_operations`) |
+| 3 | Header Details still shown | press Operations `wnd[0]/tbar[1]/btn[7]` | `ca01.open_operations` |
+| 4 | Operation Overview | work centers per layout row, Enter; **setup check again** (I.4); SAP errors stop the row; must be back on the overview | `operations.set_work_center`, `operations.fill_missing_setups` |
+| 5 | Operation Overview | base quantity (col 5) per layout row | `operations.set_base_quantity` |
+| 6 | Operation Details (double-click description col 6) | detail fields per layout row, Enter, **setup check again** (I.4), Back; machine name from Display Work Center (MD) | `operations.set_details`, `operations.machine_name` |
+| 7 | Operation Overview | Save | `ca02.save` |
+
+### I.2 Operation layout per department
+
+Rows = 0-based visible rows of the operation overview (0 = 0005, 1 = 0010, 2 = 0020, ...).
+"keep" = the copy source's work center stays. Not verified on SAP yet (`verified = False`).
+
+| Layout (when) | Row | Role | Work center | Base qty (overview) | Operation Details |
+|---|---|---|---|---|---|
+| **AS** (Dept AS) | 1 | production | Resource | Capacity | - |
+| | 2 | final (PP94) | keep | Capacity | - |
+| **PLT** (Dept PLT; no component allocation) | 1 | production | Resource | Capacity | - |
+| | 2 | final | keep | Capacity | - |
+| **STP** (Dept STP) | 2 | production | Resource | - | base qty, cavity, eff, util |
+| | 3 | tool line | Tool | - | op text = its WC text, base qty, cavity, eff, util |
+| | 4 | final | keep | Capacity x Tool Cavity | - |
+| **MD** (Dept MD, no Sorting/ Lubricant) | 2 | production | Resource | - | op text = machine name, base qty, cavity, eff, util, **setup 1** |
+| | 3 | tool line | Tool | - | op text = its WC text, base qty, cavity, eff, util |
+| | 4 | final | keep | Capacity x Tool Cavity | - |
+| **MD_SORTING** (Dept MD + Sorting/ Lubricant) | 2, 3 | as MD | | | as MD |
+| | 4 | sorting (YMHI) | Sorting/ Lubricant | Sorting/ Lubricant Capacity | - |
+| | 5 | final | keep | Capacity x Tool Cavity | - |
+
+Detail fields: base qty = Capacity, cavity (unit conversion header qty) = Tool Cavity,
+eff / util = Efficiency / Utilization - **blank in Excel = not typed, the copied value stays** (D.3).
+Setup is typed only by MD / MD_SORTING on the production row (`1`, as UiPath mold; commented out in
+UiPath stamping). Not covered: `C_AUTO` assembly routings (Business rules checklist, open item).
+
+### I.3 Department differences in short
+
+| | AS | PLT | STP | MD | MD_SORTING |
+|---|---|---|---|---|---|
+| Opens Operation Details | no | no | yes (2 rows) | yes (2 rows) | yes (2 rows) |
+| Tool work center | - | - | row 3 | row 3 | row 3 |
+| Machine name as op text | - | - | - | yes | yes |
+| Setup typed | - | - | - | yes (`1`) | yes (`1`) |
+| Final step base qty | Capacity | Capacity | Capacity x Cavity | Capacity x Cavity | Capacity x Cavity |
+| Component allocation | yes | **no** | yes | yes | yes |
+
+### I.4 Missing setup on a copied operation (Operation - Check)
+
+**Rule (user, 2026-11-18; extended 2026-11-19):** after **every Enter of the operation entry** - after the header, after the work centers (seen live: row 2 of `add_routing_test - Copy.xlsx`, STP 5051070099, error was `No cell [5,4] ... status 'Enter standard value Setup'`), and in Operation Details - when CA01 stops on
+"Create Routing: Operation - Check" with the status "Enter standard value Setup", type
+**STD Setup = `1`** and **unit = `H` (hour)**, press Enter, and repeat for every time the popup shows
+(once per operation that has no STD Setup), until the operation overview shows. Only blank fields
+are filled; a value already there is kept. Applies
+to every department (it depends on the copy source, not the layout).
+
+| Item | Value |
+|---|---|
+| Why it happens | the copy source has an operation without setup, e.g. AS `C_AUTO` (control key MP03) - 152 such MP03 rows at plant 1901 (`docs/operation_values.md`, "Known exceptions") |
+| Values | `elements.SETUP_DEFAULT = "1"`, `elements.SETUP_DEFAULT_UNIT = "H"`; consistent with the standard-value rule `1.000 H` at 0020 of `routing check operation-values` |
+| Limit | max 20 times per Enter (`operations.MAX_SETUP_CHECKS`), then Failed; an SAP error (E / A) other than the setup message -> Failed |
+| Where | `operations.fill_missing_setups` (shared): called in `ca01.open_operations` (after the header), `CreateRouting.run` after the work-center Enter, `operations.set_details` after its Enter. `fill_header` no longer Enter-s this warning away (`operations.on_setup_check`) |
+| Result | not reported in `RESULT_ROUTING` (user: redundant, 2026-11-19) - the row just shows `Done: ...` |
+| Elements | setup `wnd[0]/usr/sub/3/txt[6]`; unit has no recorded id, found as the field right of setup (`docs/uipath/ui_elements.md` 4) |
+| Test | `test_setup_check_after_header_gets_setup_1_h_until_operation_overview`, `test_setup_check_is_handled_after_any_enter_not_only_after_the_header` |
+| UiPath | had an Enter on this screen, commented out (`create_routing_mold` / `_stamping`); it never typed a value |
+| Live | after the header: done 2026-11-19 (rows 4, 5 of `add_routing_test - Copy.xlsx`, AS `C_AUTO1`: `setup 1 H entered on 3 operation(s)`). After the work centers: fix not run live yet (row 2). Open: record the unit field id |
+
+### I.5 Other screens that stop the operation entry
+
+| Screen / message | Python |
+|---|---|
+| E / A status after the work-center Enter (e.g. unknown work center) | row Failed with the SAP text (`raise_on_error("work centers")`) |
+| Operation Details does not open | row Failed: `Operation Details of row N did not open` |
+| Operation overview not shown after btn[7] | row Failed: `Operation overview not shown` |
+| any failure | (1) the SAP screen + status bar are read and added to the result as `[SAP: wnd[0] '...', status '...']` (unless the message already has them); (2) reset: popups closed, `/n`; the exit popup is **read**: save question -> **No**, "data will be lost" / "exit editing" -> **Yes** (leave unsaved), anything else -> the run stops (nothing clicked, RunAborted); (3) row Failed, next row. **Save is never pressed for a failed step** - steps press it only as their last action. Tests: `test_failed_step_logs_status_bar_and_never_presses_save`, `test_reset_never_saves_save_question_no_data_lost_yes_unknown_stops` |
