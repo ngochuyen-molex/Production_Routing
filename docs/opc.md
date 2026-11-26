@@ -176,7 +176,8 @@ Existing TPM rows are read for the input materials via `routing.data.tpm.fetch_e
 | anything else | `<material>-<group counter>`, e.g. `12345-2` |
 
 ### Ideal cycle time
-Capacity source, first match wins: `Ideal cycle time` (used as is) → `Capacity(Pcs/hr)` → `Capacity` (shots/hr, multiplied by Tool Cavity, default 1).
+Full rule, examples and known pitfalls: [`idealcycletime.md`](idealcycletime.md). In short: `Ideal cycle time`
+(as is) → `Capacity(Pcs/hr)` → `Capacity` (shots/hr × Tool Cavity), then
 
 | Dept | Formula |
 |---|---|
@@ -206,7 +207,7 @@ Rows with the same Material + Resource + Tool (a blank tool only groups with oth
 | Resource | Spec taken from the material's existing rows |
 |---|---|
 | Contains `YMHI` (any case) | First non-blank Spec that does **not** contain `production` **and** does contain `sort` or `lubrication` (case-insensitive). None found → blank, logged on **Spec Warning** |
-| Anything else | First non-blank Spec |
+| Anything else | First non-blank Spec that does **not** contain `sort` or `lubrication` (case-insensitive) |
 
 Existing rows keep their own Spec.
 
