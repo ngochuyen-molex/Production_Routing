@@ -1,10 +1,10 @@
 from pathlib import Path
 import pandas as pd
-from routing.core.config import PLANT
-from routing.core.db import snowflake_session
-from routing.data.routing import group_counters
 from routing.data.workflow import fetch_workflow_steps as fetch_steps
 from routing.opc.tpm_common import clean_string, get_sql_connection, validate_input_columns
+from routing.opc.workflow_common import (
+    build_source_candidates, fetch_sap_counters, prepare_targets, select_source_workflows, source_not_found_reason,
+)
 
 
 # ============================================================
@@ -12,8 +12,6 @@ from routing.opc.tpm_common import clean_string, get_sql_connection, validate_in
 # ============================================================
 
 REQUIRED_COLUMNS = ["Material", "group counter", "Resource"]
-
-SAP_PLANT = PLANT
 
 REVISION_CYCLE = ["A", "B", "C"]
 NEW_WORKFLOW_REVISION = "A"
@@ -57,25 +55,13 @@ def build_description(row):
     return "-".join(part for part in [resource, tool, material] if part)
 
 
-def build_workflow_name(material, counter_number):
-    # group counter 1 workflow is named with the material only
-    return material if counter_number == 1 else f"{material}-{counter_number}"
-
-
 def prepare_input(input_df):
-    prepared_df = input_df.copy()
+    # shared: clean Material / group counter, blank rows, TargetWorkflowName
+    prepared_df, blank_key_df = prepare_targets(input_df)
 
-    for column in ["Material", "group counter", "Resource"]:
-        prepared_df[column] = prepared_df[column].apply(clean_string)
-
+    # add-workflow only: Resource / Tool, the new description, conflict check
+    prepared_df["Resource"] = prepared_df["Resource"].apply(clean_string)
     prepared_df["Tool"] = prepared_df["Tool"].apply(clean_string) if "Tool" in prepared_df.columns else ""
-
-    blank_key_df = prepared_df[(prepared_df["Material"] == "") | (prepared_df["group counter"] == "")].copy()
-    prepared_df = prepared_df[(prepared_df["Material"] != "") & (prepared_df["group counter"] != "")].copy()
-
-    prepared_df["TargetWorkflowName"] = prepared_df["Material"] + "-" + prepared_df["group counter"]
-    first_counter_mask = prepared_df["group counter"] == "1"
-    prepared_df.loc[first_counter_mask, "TargetWorkflowName"] = prepared_df.loc[first_counter_mask, "Material"]
     prepared_df["NewDescription"] = prepared_df.apply(build_description, axis=1)
 
     target_summary = (
@@ -119,50 +105,6 @@ def build_log_row(input_row, reason):
 # ============================================================
 # FETCH SAP ROUTING GROUP COUNTERS
 # ============================================================
-
-def fetch_sap_counters(materials):
-    materials = list(dict.fromkeys(clean_string(material) for material in materials if clean_string(material)))
-
-    if not materials:
-        return pd.DataFrame(columns=["Material", "CounterNumber"])
-
-    with snowflake_session() as conn:
-        counter_df = group_counters(conn, materials, SAP_PLANT)
-    counter_df.columns = ["Material", "GroupCounter"]
-
-    counter_df["Material"] = counter_df["Material"].apply(clean_string)
-    counter_df["CounterNumber"] = pd.to_numeric(counter_df["GroupCounter"], errors="coerce")
-    counter_df = counter_df.dropna(subset=["CounterNumber"])
-    counter_df["CounterNumber"] = counter_df["CounterNumber"].astype(int)
-
-    return counter_df[["Material", "CounterNumber"]].drop_duplicates()
-
-
-def build_source_candidates(counter_df, prepared_df):
-    target_counters = prepared_df[["Material", "group counter", "Resource", "Tool", "TargetWorkflowName"]].copy()
-    target_counters["CounterNumber"] = pd.to_numeric(target_counters["group counter"], errors="coerce")
-
-    # input counters without an active SAP routing: warning only
-    sap_keys = set(zip(counter_df["Material"], counter_df["CounterNumber"]))
-    not_in_sap_mask = [
-        (material, counter) not in sap_keys
-        for material, counter in zip(target_counters["Material"], target_counters["CounterNumber"])
-    ]
-    target_not_in_sap_df = target_counters[not_in_sap_mask][LOG_COLUMNS[:-1]].copy()
-    target_not_in_sap_df["Reason"] = f"No active SAP routing for this group counter (plant {SAP_PLANT}, PLNTY=N)"
-
-    # target counters are never used as source
-    candidate_df = counter_df.merge(target_counters[["Material", "CounterNumber"]], on=["Material", "CounterNumber"], how="left", indicator=True)
-    candidate_df = candidate_df[candidate_df["_merge"] == "left_only"].drop(columns="_merge")
-
-    candidate_df["SourceWorkflowName"] = [
-        build_workflow_name(material, counter)
-        for material, counter in zip(candidate_df["Material"], candidate_df["CounterNumber"])
-    ]
-    candidate_df = candidate_df.sort_values(by=["Material", "CounterNumber"], ascending=[True, False])
-
-    return candidate_df, target_not_in_sap_df
-
 
 # ============================================================
 # FETCH WORKFLOW STEPS BY NAME (CURRENT REVISION)
@@ -228,46 +170,6 @@ def fetch_workflow_revisions(workflow_names):
 # ============================================================
 # SELECT ONE SOURCE WORKFLOW PER MATERIAL
 # ============================================================
-
-def select_source_workflows(candidate_df):
-    selection_columns = ["Material", "SourceGroupCounter", "SourceWorkflowName", "CandidateCounters", "SkippedCounters"]
-
-    if candidate_df.empty:
-        return pd.DataFrame(), pd.DataFrame(columns=selection_columns)
-
-    candidate_steps_df = fetch_workflow_steps(candidate_df["SourceWorkflowName"].tolist())
-    found_workflows = set(candidate_steps_df["WorkflowName"]) if not candidate_steps_df.empty else set()
-
-    # highest SAP counter that exists in MES, falling back to the next highest
-    selection_rows = []
-
-    for material, group_df in candidate_df.groupby("Material", sort=False):
-        counters = group_df["CounterNumber"].astype(str).tolist()
-        selected = group_df[group_df["SourceWorkflowName"].isin(found_workflows)].head(1)
-
-        if selected.empty:
-            continue
-
-        selected_counter = str(selected["CounterNumber"].iloc[0])
-
-        selection_rows.append({
-            "Material": material,
-            "SourceGroupCounter": selected_counter,
-            "SourceWorkflowName": selected["SourceWorkflowName"].iloc[0],
-            "CandidateCounters": ", ".join(counters),
-            "SkippedCounters": ", ".join(counters[:counters.index(selected_counter)])
-        })
-
-    selection_df = pd.DataFrame(selection_rows, columns=selection_columns)
-
-    if selection_df.empty:
-        return pd.DataFrame(), selection_df
-
-    source_df = candidate_steps_df[candidate_steps_df["WorkflowName"].isin(selection_df["SourceWorkflowName"])].copy()
-    source_df = source_df.merge(selection_df[["Material", "SourceWorkflowName"]], left_on="WorkflowName", right_on="SourceWorkflowName", how="inner")
-
-    return source_df, selection_df
-
 
 # ============================================================
 # REVISION RULE
@@ -467,18 +369,6 @@ def build_generation_audit(generated_df):
     return audit_df.sort_values(by=["TargetWorkflowName", "_BlockOrder"])[audit_columns]
 
 
-def build_missing_source_reasons(missing_source_df, candidate_df):
-    if missing_source_df.empty:
-        return missing_source_df
-
-    sap_found = set(candidate_df["Material"]) if not candidate_df.empty else set()
-
-    missing_source_df["Reason"] = f"No SAP routing group counter found (plant {SAP_PLANT}, PLNTY=N) after excluding target counters"
-    missing_source_df.loc[missing_source_df["Material"].isin(sap_found), "Reason"] = "No MES workflow found for any SAP routing group counter"
-
-    return missing_source_df
-
-
 def build_issues(issue_frames):
     issue_columns = LOG_COLUMNS[:-1] + ["Result", "Reason"]
     frames = []
@@ -523,12 +413,14 @@ def main(input_file, output_file):
     print("Loading SAP routing group counters...")
 
     counter_df = fetch_sap_counters(materials)
-    candidate_df, target_not_in_sap_df = build_source_candidates(counter_df, prepared_df)
+    candidate_df, target_not_in_sap_df, _ = build_source_candidates(counter_df, prepared_df, LOG_COLUMNS[:-1])
 
     print(f"Found {len(candidate_df)} candidate source counters. {len(target_not_in_sap_df)} target counters not in SAP.")
     print("Loading one source workflow per material...")
 
-    source_df, selection_df = select_source_workflows(candidate_df)
+    source_df, selection_df = select_source_workflows(candidate_df, fetch_workflow_steps)
+    if not source_df.empty:
+        source_df = source_df.merge(selection_df[["Material", "SourceWorkflowName"]], left_on="WorkflowName", right_on="SourceWorkflowName", how="inner")
 
     source_workflow_count = source_df["SourceWorkflowName"].nunique() if not source_df.empty else 0
     print(f"Found {source_workflow_count} selected source workflows with {len(source_df)} step rows.")
@@ -548,7 +440,7 @@ def main(input_file, output_file):
         revision_map
     )
 
-    missing_source_df = build_missing_source_reasons(missing_source_df, candidate_df)
+    missing_source_df = source_not_found_reason(missing_source_df, candidate_df)
 
     issues_df = build_issues([
         (missing_source_df, "Skipped", ""),

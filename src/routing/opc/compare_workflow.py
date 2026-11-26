@@ -2,11 +2,11 @@
 
 import pandas as pd
 
-from routing.core.config import PLANT
-from routing.core.db import snowflake_session
-from routing.data.routing import group_counters
 from routing.data.workflow import fetch_workflow_steps
 from routing.opc.tpm_common import clean_string, validate_input_columns
+from routing.opc.workflow_common import (
+    build_source_candidates, fetch_sap_counters, prepare_targets, select_source_workflows, source_not_found_reason,
+)
 
 
 # ============================================================
@@ -14,8 +14,6 @@ from routing.opc.tpm_common import clean_string, validate_input_columns
 # ============================================================
 
 REQUIRED_COLUMNS = ["Material", "group counter"]
-
-SAP_PLANT = PLANT
 
 STEP_COLUMNS = [
     "Material",
@@ -33,24 +31,12 @@ STEP_COLUMNS = [
 # ============================================================
 
 def prepare_input(input_df):
-    prepared_df = input_df.copy()
+    # shared: clean Material / group counter, blank rows, TargetWorkflowName
+    prepared_df, blank_key_df = prepare_targets(input_df)
 
-    prepared_df["Material"] = prepared_df["Material"].apply(clean_string)
-    prepared_df["group counter"] = prepared_df["group counter"].apply(clean_string)
-
-    blank_key_df = prepared_df[(prepared_df["Material"] == "") | (prepared_df["group counter"] == "")].copy()
-    prepared_df = prepared_df[(prepared_df["Material"] != "") & (prepared_df["group counter"] != "")].copy()
-
-    prepared_df["TargetWorkflowName"] = prepared_df["Material"] + "-" + prepared_df["group counter"]
-    # group counter 1 workflow is named with the material only
-    first_counter_mask = pd.to_numeric(prepared_df["group counter"], errors="coerce") == 1
-    prepared_df.loc[first_counter_mask, "TargetWorkflowName"] = prepared_df.loc[first_counter_mask, "Material"]
-
-    conflict_targets = prepared_df.groupby("TargetWorkflowName")["Material"].nunique()
-    conflict_targets = conflict_targets[conflict_targets > 1].index
-
-    conflict_df = prepared_df[prepared_df["TargetWorkflowName"].isin(conflict_targets)].copy()
-    prepared_df = prepared_df[~prepared_df["TargetWorkflowName"].isin(conflict_targets)].drop_duplicates(subset=["TargetWorkflowName"], keep="last").copy()
+    # a target name contains its material, so there is nothing to conflict on: only de-duplicate
+    conflict_df = prepared_df.iloc[0:0].copy()
+    prepared_df = prepared_df.drop_duplicates(subset=["TargetWorkflowName"], keep="last").copy()
 
     return prepared_df, blank_key_df, conflict_df
 
@@ -89,83 +75,9 @@ def fetch_workflows_by_name(target_workflows):
 # FETCH SAP ROUTING GROUP COUNTERS
 # ============================================================
 
-def fetch_sap_counters(materials, prepared_df):
-    materials = list(dict.fromkeys(clean_string(material) for material in materials if clean_string(material)))
-
-    candidate_columns = ["Material", "CounterNumber", "SourceWorkflowName"]
-    exists_columns = ["Material", "group counter", "TargetWorkflowName", "Reason"]
-
-    if not materials:
-        return pd.DataFrame(columns=candidate_columns), pd.DataFrame(columns=exists_columns)
-
-    with snowflake_session() as conn:
-        counter_df = group_counters(conn, materials, SAP_PLANT)
-    counter_df.columns = ["Material", "GroupCounter"]
-
-    counter_df["Material"] = counter_df["Material"].apply(clean_string)
-    counter_df["CounterNumber"] = pd.to_numeric(counter_df["GroupCounter"], errors="coerce")
-    counter_df = counter_df.dropna(subset=["CounterNumber"]).drop_duplicates(subset=["Material", "CounterNumber"])
-
-    target_counters = prepared_df[["Material", "group counter", "TargetWorkflowName"]].copy()
-    target_counters["CounterNumber"] = pd.to_numeric(target_counters["group counter"], errors="coerce")
-
-    # target counters already in SAP: excluded from source, logged separately
-    already_exists_df = target_counters.merge(counter_df[["Material", "CounterNumber"]], on=["Material", "CounterNumber"], how="inner")
-    already_exists_df = already_exists_df[["Material", "group counter", "TargetWorkflowName"]].copy()
-    already_exists_df["Reason"] = f"Group counter already exists in SAP routing (plant {SAP_PLANT})"
-
-    candidate_df = counter_df.merge(target_counters[["Material", "CounterNumber"]], on=["Material", "CounterNumber"], how="left", indicator=True)
-    candidate_df = candidate_df[candidate_df["_merge"] == "left_only"].copy()
-
-    candidate_df["SourceWorkflowName"] = candidate_df["Material"] + "-" + candidate_df["CounterNumber"].astype(int).astype(str)
-    # group counter 1 workflow is named with the material only
-    candidate_df.loc[candidate_df["CounterNumber"] == 1, "SourceWorkflowName"] = candidate_df["Material"]
-    candidate_df = candidate_df.sort_values(by=["Material", "CounterNumber"], ascending=[True, False])
-
-    return candidate_df[candidate_columns], already_exists_df
-
-
 # ============================================================
 # FETCH ONE SOURCE WORKFLOW PER MATERIAL
 # ============================================================
-
-def fetch_source_workflows(candidate_df):
-    selection_columns = ["Material", "SourceGroupCounter", "SourceWorkflowName", "CandidateCounters", "SkippedCounters"]
-
-    if candidate_df.empty:
-        return pd.DataFrame(columns=STEP_COLUMNS), pd.DataFrame(columns=selection_columns)
-
-    candidate_steps_df = fetch_workflows_by_name(candidate_df["SourceWorkflowName"].tolist())
-    found_workflows = set(candidate_steps_df["WorkflowName"]) if not candidate_steps_df.empty else set()
-
-    # highest SAP counter that exists in MES, falling back to the next highest
-    selection_rows = []
-
-    for material, group_df in candidate_df.groupby("Material", sort=False):
-        counters = group_df["CounterNumber"].astype(int).astype(str).tolist()
-        selected = group_df[group_df["SourceWorkflowName"].isin(found_workflows)].head(1)
-
-        if selected.empty:
-            continue
-
-        selected_counter = str(int(selected["CounterNumber"].iloc[0]))
-
-        selection_rows.append({
-            "Material": material,
-            "SourceGroupCounter": selected_counter,
-            "SourceWorkflowName": selected["SourceWorkflowName"].iloc[0],
-            "CandidateCounters": ", ".join(counters),
-            "SkippedCounters": ", ".join(counters[:counters.index(selected_counter)])
-        })
-
-    selection_df = pd.DataFrame(selection_rows, columns=selection_columns)
-
-    if selection_df.empty:
-        return pd.DataFrame(columns=STEP_COLUMNS), selection_df
-
-    source_df = candidate_steps_df[candidate_steps_df["WorkflowName"].isin(selection_df["SourceWorkflowName"])].copy()
-    return source_df, selection_df
-
 
 # ============================================================
 # DUPLICATE SEQUENCE CHECK
@@ -276,8 +188,6 @@ def build_summary(comparison_df):
 def build_missing_workflows(prepared_df, target_df, source_df, candidate_df):
     target_found = set(target_df["WorkflowName"].apply(clean_string)) if not target_df.empty else set()
     source_found = set(source_df["Material"].apply(clean_string)) if not source_df.empty else set()
-    sap_found = set(candidate_df["Material"]) if not candidate_df.empty else set()
-
     missing_target_df = prepared_df[
         ~prepared_df["TargetWorkflowName"].isin(target_found)
     ][["Material", "group counter", "TargetWorkflowName"]].copy()
@@ -288,10 +198,7 @@ def build_missing_workflows(prepared_df, target_df, source_df, candidate_df):
         ~prepared_df["Material"].isin(source_found)
     ][["Material", "group counter", "TargetWorkflowName"]].copy()
 
-    missing_source_df["Reason"] = f"No SAP routing group counter found (plant {SAP_PLANT}, PLNTY=N) after excluding target counters"
-    missing_source_df.loc[missing_source_df["Material"].isin(sap_found), "Reason"] = "No MES workflow found for any SAP routing group counter"
-
-    return missing_target_df, missing_source_df
+    return missing_target_df, source_not_found_reason(missing_source_df, candidate_df)
 
 
 # ============================================================
@@ -321,12 +228,15 @@ def main(input_file, output_file):
     print(f"Found {target_df['WorkflowName'].nunique() if not target_df.empty else 0} target workflows with {len(target_df)} step rows.")
     print("Loading SAP routing group counters...")
 
-    candidate_df, already_exists_df = fetch_sap_counters(materials, prepared_df)
+    counter_df = fetch_sap_counters(materials)
+    candidate_df, _, already_exists_df = build_source_candidates(counter_df, prepared_df, ["Material", "group counter", "TargetWorkflowName"])
 
     print(f"Found {len(candidate_df)} candidate source counters. {len(already_exists_df)} target counters already exist in SAP.")
     print("Loading one source workflow per material...")
 
-    source_df, selection_df = fetch_source_workflows(candidate_df)
+    source_df, selection_df = select_source_workflows(candidate_df, fetch_workflows_by_name)
+    if source_df.empty:
+        source_df = pd.DataFrame(columns=STEP_COLUMNS)
 
     print(f"Found {source_df['WorkflowName'].nunique() if not source_df.empty else 0} source workflows with {len(source_df)} step rows.")
 

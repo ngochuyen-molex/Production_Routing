@@ -18,9 +18,23 @@ Code lives in `src/routing/opc/`. Run with `routing opc <name> -i INPUT.xlsx [-o
 
 ## Shared logic
 
+Code: `src/routing/opc/workflow_common.py`, used by both `add_workflow.py` and `compare_workflow.py`,
+so the two cannot pick different targets or sources. Each script adds only its own steps on top
+(add: description, conflict check, revisions; compare: step comparison).
+
+| Function | Does |
+|---|---|
+| `prepare_targets` | clean Material / group counter, set blank rows aside, build `TargetWorkflowName` |
+| `build_workflow_name` | naming rule below |
+| `fetch_sap_counters` | SAP group counters per material (Snowflake) |
+| `build_source_candidates` | counters minus the targets; logs "not in SAP" (add uses it) and "already in SAP" (compare uses it) |
+| `select_source_workflows` | source selection below |
+| `source_not_found_reason` | reason when a material gets no source |
+
 ### Workflow naming
 - Workflow name = `Material-<group counter>`, e.g. `5019506039-22`. No zero padding.
 - Group counter `1` is named with the material only, e.g. `2216982000` (source and target, both scripts).
+  The counter is compared as a number, so `01` / `1.0` in the input also count as 1.
 
 ### Source selection (one source per material)
 1. Read the material's routing group counters from SAP (`MAPL`, `PLKO`, `MARC`):
