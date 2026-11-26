@@ -19,6 +19,41 @@ Built: routing (create in CA01, inactivate in CA02), components (CA02) and produ
 4. The request Excel file is **closed** - results are saved into it after every row; if it is open
    the run stops with "close it in Excel".
 
+### Run all phases or one phase
+
+`routing run` has three SAP phases. Without `--phase` all three run, in this order, each one for
+all rows before the next starts:
+
+| Phase | `--phase` | Add rows | Delete rows | Assign components rows |
+|---|---|---|---|---|
+| 1. Routing | `routing` | create routing in CA01 (copy from source) | inactivate routing in CA02 | - |
+| 2. Components (BOM assignment) | `components` | assign components in CA02 | - | assign components in CA02 |
+| 3. Production version | `pv` | create production version in MM02 | delete production version in MM02 | - |
+
+```powershell
+# all phases (routing -> components -> production version)
+routing run "C:\path\requests.xlsx"
+
+# one phase
+routing run "C:\path\requests.xlsx" --phase routing       # 1. create / inactivate routing only
+routing run "C:\path\requests.xlsx" --phase components    # 2. BOM component assignment only
+routing run "C:\path\requests.xlsx" --phase pv            # 3. production version only
+
+# several phases
+routing run "C:\path\requests.xlsx" --phase components --phase pv
+
+# combine with Action / rows
+routing run "C:\path\requests.xlsx" --only add --phase pv     # production versions of Add rows only
+routing run "C:\path\requests.xlsx" --rows 5-12 --phase routing
+```
+
+A later phase needs the earlier one done: components and pv use the group / group counter that
+the routing phase writes into the row. Running `--phase pv` alone works for rows whose routing is
+already `Done` (or whose `group` / `group counter` is filled). If an earlier phase `Failed` for a
+row, its later phases are not run for that row. Rows already `Done` / `Skipped` in
+a phase are skipped on rerun, `Failed` rows are retried. OpCenter is not a phase: run
+`routing opc ...` afterwards (see [All commands](#all-commands)).
+
 ### First test run, step by step
 
 ```powershell
