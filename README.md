@@ -119,17 +119,6 @@ In every new terminal: `C:\Users\nguyeb3\venvs\routing\Scripts\Activate.ps1`, th
 `pip install -e .` makes `routing` importable from any folder and adds the `routing` command.
 Snowflake uses the `default` connection from your Snowflake `connections.toml`.
 
-## Before UiPath
-
-```powershell
-routing pre-uipath C:\path\input.xlsx
-# or, without installing:
-python pre_uipath.py C:\path\input.xlsx
-```
-
-Runs routing condition, then alt BOM count, on one Snowflake connection and writes the
-results back to the file (`SKIP`, `SKIP_REASON`, `group`, `group counter`, `ALT_BOM_COUNT`).
-Exit code `0` = success, `1` = error, so UiPath can branch on it.
 
 ## All commands
 
@@ -160,18 +149,6 @@ sorting / final step, the standard values (setup, machine, labor must be `1.000 
 efficiency / utilization. Rules, documented exceptions and known gaps:
 [`docs/operation_values.md`](docs/operation_values.md). It replaces the former
 `operation-capacity` and `util-eff` commands, which still work as aliases.
-
-## Use from other code
-
-```python
-from routing.checks.routing_condition import check_routing_exists
-from routing.pipelines.pre_uipath import pre_uipath_checks
-
-df = pre_uipath_checks(df)            # DataFrame in, DataFrame out
-```
-
-Every check has a pure `check_xxx(df, conn=None, plant=PLANT)` function and a `run(path)`
-wrapper that reads and writes Excel. Pass `conn` to reuse one Snowflake connection.
 
 ## Layout
 
@@ -217,13 +194,6 @@ longer needed. UiPath keeps running until each Python branch is proven on SAP.
 | [`docs/verification.md`](docs/verification.md) | what is checked / still open (the only checklist) |
 | [`docs/uipath_flows.md`](docs/uipath_flows.md) | how the UiPath project works (being replaced) |
 | `docs/uipath/ui_elements.md`, `.csv` | SAP element ids taken from UiPath (regenerate: `tools/uipath_dump.py`, `tools/uipath_catalog.py`) |
-
-**Related folders** (read-only, never changed from here)
-
-| Folder | What |
-|---|---|
-| `C:\Users\nguyeb3\OneDrive - kochind.com\Documents\UiPath\add routing` | the UiPath project. `main.xaml` is empty, each workflow is run on its own; all SAP actions use element ids (UiPath `usr/sub?N/...` = scripting `wnd[0]/usr/sub/N/...`); no OpCenter steps |
-| `C:\Users\nguyeb3\Downloads\SAP_automation\change_bom` | Python SAP GUI scripting: `production_version.py` (MM02), `routing.py` / `routing_main.py` (CA02 component allocation), `bom.py` / `bom_create.py` (CS02 / CS01). Code reused here is **copied**, see `docs/architecture.md` 5.4 |
 
 **Decisions**
 

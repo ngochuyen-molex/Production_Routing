@@ -76,26 +76,17 @@ class CreateProductionVersion(Step):
             return StepResult.failed("routing key / description unknown (routing phase not done)")
         sap = ctx.sap
         mm02.open_versions(sap, row.request.material)
-        on_screen = mm02.read_version_texts(sap)
-        numbers = list(on_screen)
-        by_text = {t.strip().upper(): v for v, t in on_screen.items() if t}
-        created, existing, warnings = [], [], []
+        numbers = mm02.read_versions(sap)
+        created, warnings = [], []
         for alt_bom in row.plan.alt_boms:
-            text = ProductionVersion.text_for(routing, alt_bom)
-            if text.strip().upper() in by_text:     # already in SAP (Snowflake behind) -> no duplicate
-                existing.append(f"{by_text[text.strip().upper()]} (B{alt_bom})")
-                continue
             version = next_version_number(numbers)
-            warning = mm02.add_version(sap, version, text, row.key, alt_bom)
+            warning = mm02.add_version(sap, version, ProductionVersion.text_for(routing, alt_bom), row.key, alt_bom)
             numbers.append(version)
             created.append(f"{version} (B{alt_bom})")
             if warning:
                 warnings.append(f"{version}: {warning}")
         message = mm02.close_and_save(sap, f"production versions of {row.request.material}")
-        if not created:
-            return StepResult.skipped("versions already in SAP: " + ", ".join(existing))
-        text = ", ".join(created) + (f". Already in SAP: {', '.join(existing)}" if existing else "") \
-            + (f". Check warning: {'; '.join(warnings)}" if warnings else "")
+        text = ", ".join(created) + (f". Check warning: {'; '.join(warnings)}" if warnings else "")
         return StepResult.done(f"{text}. {message}".strip(". "))
 
 
