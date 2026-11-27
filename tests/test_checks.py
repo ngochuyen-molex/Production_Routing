@@ -2,7 +2,6 @@
 import pandas as pd
 
 from routing.checks import alt_bom, operation_values, routing_condition
-from routing.pipelines import pre_uipath
 
 
 class FakeCursor:
@@ -89,12 +88,6 @@ def test_alt_bom_count_fills_zero():
     df = pd.DataFrame({"Material": ["12345", "99999"]})
     out = alt_bom.check_alt_bom_count(df, conn=FakeConn(RESPONSES))
     assert out["ALT_BOM_COUNT"].tolist() == [2, 0]
-
-
-def test_pre_uipath_adds_both_results():
-    out = pre_uipath.pre_uipath_checks(input_df(), conn=FakeConn(RESPONSES))
-    assert {"SKIP", "SKIP_REASON", "ALT_BOM_COUNT"} <= set(out.columns)
-    assert out["ALT_BOM_COUNT"].tolist() == [2, 2, 2, 0]
 
 
 OP_COLUMNS = ["MATNR", "ROUTING_GROUP", "GROUP_COUNTER", "ROUTING_DESCRIPTION", "OPERATION_NUMBER",

@@ -1,6 +1,5 @@
 """Command line entry point.
 
-    routing pre-uipath FILE
     routing run FILE [--dry-run] [--phase routing] [--only create] [--rows 5-12] [--slow]
     routing check routing-condition FILE [-o OUT]
     routing opc add-tpm [-i FILE] [-o OUT]
@@ -85,10 +84,6 @@ def build_parser():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    pre = sub.add_parser("pre-uipath", help="routing condition -> alt BOM count (before UiPath)")
-    pre.add_argument("file", nargs="?")
-    pre.add_argument("-o", "--output")
-
     run = sub.add_parser("run", help="plan + run routing requests in SAP (Action column: Add / Delete / Assign Components)")
     run.add_argument("file", nargs="?")
     run.add_argument("--phase", action="append", choices=PHASES,
@@ -117,10 +112,7 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "pre-uipath":
-            from routing.pipelines.pre_uipath import run
-            run(args.file or ask_path(), output_path=args.output)
-        elif args.command == "run":
+        if args.command == "run":
             from routing.pipelines.run import run
             run(args.file or ask_path(), phases=tuple(args.phase or PHASES),
                 only=Action.parse(args.only) if args.only else None, rows=parse_rows(args.rows),
@@ -130,25 +122,12 @@ def main(argv=None):
         elif args.command == "opc":
             run_opc(args.name, args.input, args.output)
         elif args.command == "list":
-            print("pre-uipath\nrun\n" + "\n".join(f"check {n}" for n in sorted(CHECKS))
+            print("run\n" + "\n".join(f"check {n}" for n in sorted(CHECKS))
                   + "\n" + "\n".join(f"opc {n}" for n in sorted(OPC)))
     except Exception:
         traceback.print_exc()
         return 1
     return 0
-
-
-def legacy_script(name):
-    """Entry for root scripts, e.g. `python pre_uipath.py [FILE]`."""
-    try:
-        if name == "pre-uipath":
-            from routing.pipelines.pre_uipath import run
-            run(sys.argv[1] if len(sys.argv) > 1 else ask_path())
-        else:
-            run_check(name, sys.argv[1] if len(sys.argv) > 1 else None)
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)
 
 
 if __name__ == "__main__":

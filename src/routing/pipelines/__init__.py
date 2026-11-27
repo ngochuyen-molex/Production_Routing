@@ -1,1 +1,1 @@
-"""Chained checks, e.g. pre_uipath = routing condition -> alt BOM count."""
+"""Running a routing request file: plan, phases, steps per action, Excel results (`routing run`)."""
