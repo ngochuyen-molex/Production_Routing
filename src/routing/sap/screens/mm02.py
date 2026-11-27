@@ -36,6 +36,19 @@ def read_versions(sap):
     return [v for v in versions if v]
 
 
+def read_version_texts(sap):
+    """{version number: version text} of the list, all pages, until the first blank row."""
+    texts = {}
+
+    def collect(row):
+        version = table.cell_text(sap, el.VERSION_TABLE, el.VERSION_COL, row)
+        if version:
+            texts[version] = table.cell_text(sap, el.VERSION_TABLE, el.VERSION_TEXT_COL, row)
+        return False
+    table.find_row(sap, el.VERSION_TABLE, collect, blank_col=el.VERSION_COL)
+    return texts
+
+
 def add_version(sap, version, text, key, alt_bom, bom_usage="1"):
     """New Details (wnd[2]) -> fill -> Check -> close. Returns the Check warning text ('' = none)."""
     sap.press(el.VERSION_NEW_DETAILS)

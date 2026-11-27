@@ -625,7 +625,7 @@ class CreateProductionVersion(Step):
         plan.existing_versions = ctx.versions(material).on(routing.key)
         plan.alt_boms = ctx.versions(material).missing(routing.key, wanted)   # never a duplicate
     def run(self, row, ctx):
-        mm02.open_versions -> read_versions -> add_version per alt BOM (next number) -> close_and_save
+        mm02.open_versions -> read_version_texts -> per alt BOM: skip if its text is already in the list, else add_version (next number) -> close_and_save
 
 class DeleteProductionVersion(Step):          # versions of the routing (group + counter) from Snowflake
     def run(self, row, ctx):
