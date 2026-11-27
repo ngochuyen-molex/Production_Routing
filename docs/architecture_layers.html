@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="snowflake-source" content="cortex-agent-authored">
+<script type="application/json" id="snowflake-report-metadata">
+{
+  "generated": "2026-11-27",
+  "intent": "Readable view of the routing run architecture: layers, call tree, run order, data between phases",
+  "dataSources": [{ "type": "file", "path": "src/routing/" }],
+  "sections": [
+    { "id": "call-tree", "title": "Call tree", "producerNotes": "From imports in pipelines/run.py, steps/*.py, steps/base.py, resolve/routings.py" },
+    { "id": "layer-rules", "title": "What each layer may touch" },
+    { "id": "run-order", "title": "One run, in order", "producerNotes": "pipelines/run.py run / plan_rows / execute / safe_run" },
+    { "id": "row-state", "title": "How phases pass data", "producerNotes": "model/row_state.py, steps/production_version.py target_routing" },
+    { "id": "create-routing", "title": "Inside one step - CreateRouting", "producerNotes": "steps/routing.py" }
+  ]
+}
+</script>
+<title>routing run - layers and calls</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0 auto; padding: clamp(16px, 4vw, 32px); max-width: 1100px; width: 100%; box-sizing: border-box; color: light-dark(#222, #e5e7eb); background: light-dark(#fff, #111827); }
+  .table-wrap { overflow-x: auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 17px; margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  p.sub { opacity: .7; margin-top: 0; }
+  code { font-family: Consolas, monospace; font-size: 13px; }
+
+  /* call tree */
+  .tree ul { list-style: none; margin: 0; padding-left: 26px; border-left: 2px solid #ccc; }
+  .tree > ul { padding-left: 0; border-left: none; }
+  .tree li { margin: 8px 0; position: relative; }
+  .tree ul ul li::before { content: ""; position: absolute; left: -26px; top: 16px; width: 22px; border-top: 2px solid #ccc; }
+  .node { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid; min-width: 220px; }
+  .node b { font-family: Consolas, monospace; font-size: 13px; }
+  .node span { display: block; font-size: 12px; opacity: .8; }
+
+  .entry    { background: light-dark(#eef2f7, #1e293b); border-color: #8a9bb5; }
+  .pipeline { background: light-dark(#e3efff, #16294a); border-color: #4a7fd4; }
+  .model    { background: light-dark(#fff6dc, #3a3015); border-color: #d4a72c; }
+  .steps    { background: light-dark(#e6f6ea, #15321f); border-color: #3a9a55; }
+  .snow     { background: light-dark(#e2f6fb, #123440); border-color: #2a9bb8; }
+  .sap      { background: light-dark(#fde8e6, #3d1a16); border-color: #cf5a4a; }
+  .layout   { background: light-dark(#f1e9fb, #2a1d3d); border-color: #8a5cc7; }
+
+  .legend span { display: inline-block; margin: 4px 10px 4px 0; padding: 3px 10px; border-radius: 4px; border: 1px solid; font-size: 12px; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: light-dark(#f4f4f4, #1f2937); }
+
+  ol li { margin: 6px 0; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0; }
+  .flow .node { min-width: 0; }
+  .arrow { color: #888; font-size: 18px; }
+</style>
+</head>
+<body>
+
+<h1><code>routing run</code> - layers and who calls what</h1>
+<p class="sub">Read top to bottom: each box calls the boxes nested under it. Nothing below calls back up.</p>
+
+<div class="legend">
+  <span class="pipeline">orchestration</span>
+  <span class="model">plain data + rules</span>
+  <span class="steps">steps (decide + act)</span>
+  <span class="snow">Snowflake</span>
+  <span class="sap">SAP GUI</span>
+  <span class="layout">layouts</span>
+</div>
+
+<h2 id="call-tree">1. Call tree</h2>
+<div class="tree">
+<ul>
+ <li><div class="node entry"><b>cli.py</b><span>command line: <code>routing run FILE ...</code></span></div>
+  <ul>
+   <li><div class="node pipeline"><b>pipelines/run.py</b><span>orchestrator - the only file that knows the order (plan, then phases)</span></div>
+    <ul>
+     <li><div class="node pipeline"><b>pipelines/workbook.py</b><span>Excel in / out: rows, RESULT_ columns, Plan + Run log sheets, save per row</span></div></li>
+     <li><div class="node pipeline"><b>pipelines/recipes.py</b><span>Action -&gt; list of Step objects (RECIPES)</span></div></li>
+     <li><div class="node model"><b>model/requests.py</b><span>one Excel row -&gt; Request (frozen)</span></div></li>
+     <li><div class="node model"><b>model/row_state.py</b><span>RowState = request + plan + key + results</span></div></li>
+     <li><div class="node steps"><b>steps/*.py</b><span>one class per SAP action: <code>plan()</code> (Snowflake) + <code>run()</code> (SAP)</span></div>
+      <ul>
+       <li><div class="node steps"><b>steps/base.py - Context</b><span>shared resources of one run + cache</span></div>
+        <ul>
+         <li><div class="node snow"><b>resolve/routings.py</b><span>pandas rows -&gt; entities (MaterialRoutings, MaterialVersions, alt BOMs)</span></div>
+          <ul>
+           <li><div class="node snow"><b>data/*.py</b><span>SQL only</span></div>
+            <ul>
+             <li><div class="node snow"><b>core/db.py</b><span>Snowflake connection</span></div></li>
+            </ul>
+           </li>
+          </ul>
+         </li>
+         <li><div class="node sap"><b>sap/session.py</b><span>SapSession, opened only when a SAP step runs</span></div></li>
+        </ul>
+       </li>
+       <li><div class="node layout"><b>layouts/select.py + catalog.py</b><span>which operation rows / values to type per workflow type</span></div></li>
+       <li><div class="node model"><b>model/entities.py</b><span>rules on SAP objects: matches, copy_source, missing versions ...</span></div></li>
+       <li><div class="node sap"><b>sap/screens/*.py</b><span>the clicks (CA01, CA02, operations, components, MM02); use sap/elements.py + session</span></div></li>
+      </ul>
+     </li>
+    </ul>
+   </li>
+  </ul>
+ </li>
+</ul>
+</div>
+
+<h2 id="layer-rules">2. What each layer may touch</h2>
+<div class="table-wrap"><table>
+ <tr><th>Layer</th><th>Holds</th><th>Uses</th><th>Never touches</th></tr>
+ <tr><td><code>model/</code></td><td>data classes + pure rules</td><td>nothing</td><td>SAP, Snowflake, Excel</td></tr>
+ <tr><td><code>data/</code></td><td>SQL -&gt; DataFrame</td><td><code>core/db</code></td><td>entities, SAP</td></tr>
+ <tr><td><code>resolve/</code></td><td>DataFrame -&gt; entities</td><td><code>data/</code>, <code>model/</code></td><td>SAP</td></tr>
+ <tr><td><code>layouts/</code></td><td>workflow type -&gt; rows, work centers, quantities</td><td><code>model/</code></td><td>SAP, Snowflake</td></tr>
+ <tr><td><code>sap/</code></td><td>how to click a screen</td><td>SAP GUI</td><td>business decisions, Snowflake</td></tr>
+ <tr><td><code>steps/</code></td><td>the decision (<code>plan</code>) + the click sequence (<code>run</code>)</td><td>all of the above</td><td>Excel</td></tr>
+ <tr><td><code>pipelines/</code></td><td>order, error handling, saving</td><td>steps, workbook</td><td>SAP screens directly</td></tr>
+</table></div>
+
+<h2 id="run-order">3. One run, in order</h2>
+<ol>
+ <li><b>Read</b> - <code>workbook.rows()</code> gives the Excel rows.</li>
+ <li><b>Parse</b> - each row becomes a <code>Request</code>; bad rows become <code>InvalidRow</code>; deletes are sorted first.</li>
+ <li><b>Previous results</b> - existing <code>RESULT_*</code> columns are read back, so a rerun skips finished steps.</li>
+ <li><b>Context</b> - opened once; Snowflake on first use, SAP only when a SAP step runs (never in <code>--dry-run</code>).</li>
+ <li><b>Plan (Snowflake only)</b> - all routings + material status loaded in one batch; every <code>step.plan()</code> fills
+     <code>row.plan</code> (target, copy source, layout, alt BOMs, skip reason, warnings). Plan sheet written.
+     <code>--dry-run</code> stops here.</li>
+ <li><b>Execute</b> - phase by phase (routing -&gt; components -&gt; pv), every row, every step:
+     skip if done, write Skipped / Failed from the plan, else <code>safe_run()</code> -&gt; <code>step.run()</code>.
+     Any error: SAP screen read, SAP reset without saving, step = Failed, next row continues.
+     File saved after every row.</li>
+</ol>
+
+<h2 id="row-state">4. How phases pass data (one RowState per row)</h2>
+<div class="flow">
+ <div class="node model"><b>request</b><span>from Excel, frozen</span></div><span class="arrow">+</span>
+ <div class="node model"><b>key</b><span>Excel / found by plan / set by CreateRouting from the SAP screen</span></div><span class="arrow">+</span>
+ <div class="node model"><b>plan</b><span>decided before SAP</span></div><span class="arrow">+</span>
+ <div class="node model"><b>results</b><span>step -&gt; StepResult -&gt; RESULT_ column</span></div>
+</div>
+<p>Example, Create row:</p>
+<div class="flow">
+ <div class="node steps"><b>CreateRouting.run</b><span>reads group / counter on CA01, sets <code>row.key</code> + <code>plan.target</code></span></div>
+ <span class="arrow">&rarr;</span>
+ <div class="node steps"><b>AllocateComponents.run</b><span><code>target_routing(row)</code></span></div>
+ <span class="arrow">&rarr;</span>
+ <div class="node steps"><b>CreateProductionVersion.run</b><span><code>target_routing(row)</code></span></div>
+</div>
+<p><code>target_routing</code> looks in order: <code>plan.target</code> &rarr; Snowflake by key &rarr; rebuilt from the layout text
+(routing made in an earlier run, not in Snowflake yet).</p>
+
+<h2 id="create-routing">5. Inside one step - CreateRouting</h2>
+<div class="table-wrap"><table>
+ <tr><th></th><th>Calls</th><th>Layer</th></tr>
+ <tr><td rowspan="4"><code>plan()</code></td><td><code>ctx.routings(material)</code></td><td>resolve / data</td></tr>
+ <tr><td><code>matching_routings</code> / <code>Routing.matches</code> - already exists? skip</td><td>model</td></tr>
+ <tr><td><code>layout_for</code>, <code>missing_inputs</code>, <code>description</code></td><td>layouts</td></tr>
+ <tr><td><code>MaterialRoutings.copy_source(fits=check_copy_source)</code> -&gt; <code>plan.copy_from</code></td><td>model + layouts</td></tr>
+ <tr><td rowspan="3"><code>run()</code></td><td><code>ca01.start / choose_copy_source / choose_alt_bom / fill_header</code></td><td>sap/screens</td></tr>
+ <tr><td><code>layouts.operation_values</code> -&gt; <code>operations.set_work_center / set_base_quantity / set_details</code></td><td>layouts + sap/screens</td></tr>
+ <tr><td><code>ca02.save</code> -&gt; <code>row.key</code> -&gt; <code>StepResult.done</code></td><td>sap/screens + model</td></tr>
+</table></div>
+<p>The step is the only place where <i>what</i> (layouts), <i>whether</i> (model + resolve) and <i>how</i> (sap/screens) meet.</p>
+
+</body>
+</html>

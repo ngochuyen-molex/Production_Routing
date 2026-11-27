@@ -77,6 +77,17 @@ Nothing has been run against real SAP yet.
       get Capacity** - in Snowflake every step 0020 .. PP94 of these routings has the same base
       quantity (e.g. 332 on 0020, 0030, 0040, 0050), so either type Capacity on every step, or only
       on 0020 + PP94. Until then: run these rows with `--phase routing` and check them in SAP.
+- [ ] **AS has more workflow / operation-view variants than the one `AS` layout** (flagged
+      2026-11-27, expansion). The `AS` layout assumes one shape: description `Resource - Material`
+      (no Tool), production on overview row 1, final PP94 on row 2, no Operation Details. Some AS
+      routings differ (more steps, other step order, e.g. `C_AUTO` above) and **some also include a
+      tool** (tool in the description and / or a tool sub-operation like STP / MD). Today such rows
+      are built with the plain `AS` layout: the Tool is not typed and not put in the description,
+      and the copy source ignores it - but the "already exists" match (`steps/routing.py:23`) does
+      require a filled Tool in the description. So an AS row with a Tool never finds the routing it
+      created (rerun = duplicate risk) and Delete / Assign Components cannot find it. To do: list
+      the AS variants from Snowflake (operation shapes per routing, tool in description yes / no),
+      then add one `LAYOUTS` entry per variant and a rule to choose it (like `MD` / `MD_SORTING`).
 - [ ] **Delete after Add on the same rows needs clearing result cells** (found 2026-11-18). Add and
       Delete share `RESULT_ROUTING` / `RESULT_MM02`; a `Done` from the Add run makes the Delete steps
       count as done. Today: clear those cells before the Delete run (H.5). Proposal: a result only
@@ -386,7 +397,8 @@ Rows = 0-based visible rows of the operation overview (0 = 0005, 1 = 0010, 2 = 0
 Detail fields: base qty = Capacity, cavity (unit conversion header qty) = Tool Cavity,
 eff / util = Efficiency / Utilization - **blank in Excel = not typed, the copied value stays** (D.3).
 Setup is typed only by MD / MD_SORTING on the production row (`1`, as UiPath mold; commented out in
-UiPath stamping). Not covered: `C_AUTO` assembly routings (Business rules checklist, open item).
+UiPath stamping). Not covered: `C_AUTO` assembly routings and other AS variants, including AS
+routings with a tool (Business rules checklist, open items).
 
 ### I.3 Department differences in short
 
