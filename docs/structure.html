@@ -90,7 +90,7 @@ only in <a href="verification.md">verification.md</a>; how to run is in <a href=
 never touches SAP, so each can be tested alone. One check never imports another check.</p>
 <pre class="mermaid">
 flowchart TD
-  CLI["cli.py<br/>routing command"] --> PIPE["pipelines/<br/>run, recipes, workbook, pre_uipath"]
+  CLI["cli.py<br/>routing command"] --> PIPE["pipelines/<br/>run, recipes, workbook"]
   CLI --> CHECKS["checks/<br/>stand-alone checks"]
   CLI --> OPC["opc/<br/>OpCenter files"]
   PIPE --> STEPS["steps/<br/>one class per SAP action"]
@@ -136,10 +136,10 @@ flowchart LR
 <div class="tree"><span class="d">ROUTING/</span>
   pyproject.toml          <span class="c"># package + `routing` command; extras [dev], [sap] (pywin32)</span>
   README.md               <span class="c"># install, how to run, commands, background</span>
-  pre_uipath.py           <span class="c"># old root shim, still called by UiPath / VBS</span>
+  <span class="d">archive/</span>                <span class="c"># retired: pre_uipath.py + its root launcher (2026-11-27)</span>
 
   <span class="d">src/routing/</span>
-    cli.py                <span class="c"># routing run | check | opc | pre-uipath | list</span>
+    cli.py                <span class="c"># routing run | check | opc | list</span>
     <span class="d">core/</span>                 <span class="c"># config.py, db.py, clean.py, excel.py - no business logic</span>
     <span class="d">data/</span>                 <span class="c"># SQL only, one module per SAP domain:</span>
                           <span class="c">#   routing, bom, production_version, operation_values, material, tpm</span>
@@ -174,7 +174,6 @@ flowchart LR
       components.py       <span class="c"># AllocateComponents</span>
       production_version.py  <span class="c"># CreateProductionVersion, DeleteProductionVersion</span>
     <span class="d">pipelines/</span>
-      pre_uipath.py       <span class="c"># routing condition -> alt BOM count</span>
       <span class="n">run.py</span>              <span class="c"># routing run: plan, phases, safe_run, RunSummary</span>
       <span class="n">recipes.py</span>          <span class="c"># Action -> steps (RECIPES)</span>
       <span class="n">workbook.py</span>         <span class="c"># read rows, RESULT_ columns, Plan + Run log sheets, save per row</span>
@@ -203,7 +202,7 @@ flowchart LR
   <div class="card"><span class="tag sap">SAP</span><h3>steps/</h3>
     <p>One class per action: <code>plan()</code> decides from Snowflake (Plan sheet), <code>run()</code> does it in SAP and returns a <code>StepResult</code>.</p></div>
   <div class="card"><span class="tag">orchestration</span><h3>pipelines/</h3>
-    <p><code>run</code> plans every row, runs the phases, writes <code>RESULT_</code> columns and saves after each row. <code>pre_uipath</code> chains two checks for UiPath.</p></div>
+    <p><code>run</code> plans every row, runs the phases, writes <code>RESULT_</code> columns and saves after each row.</p></div>
   <div class="card"><span class="tag">entry point</span><h3>cli.py</h3>
     <p>One <code>routing</code> command; file path as argument (or asked), so it runs unattended.</p></div>
 </div>
@@ -213,7 +212,6 @@ flowchart LR
   <thead><tr><th>Command</th><th>What</th></tr></thead>
   <tbody>
     <tr><td><code>routing run FILE</code> [<code>--dry-run</code>, <code>--phase routing|components|pv</code>, <code>--only add|delete|"assign components"</code>, <code>--rows</code>, <code>--slow</code>, <code>--sheet</code>]</td><td>SAP routing automation</td></tr>
-    <tr><td><code>routing pre-uipath FILE</code></td><td>routing condition, then alt BOM count</td></tr>
     <tr><td><code>routing check NAME FILE</code></td><td><code>routing-condition</code>, <code>alt-bom</code>, <code>delete-status</code>, <code>operation-values</code> (aliases <code>operation-capacity</code>, <code>util-eff</code>), <code>routings-by-tool</code>, <code>tpm-exist</code>, <code>pv-count</code>, <code>pv-by-group</code>, <code>pv-by-attributes</code>, <code>pv-fallback</code>, <code>pv-exist</code></td></tr>
     <tr><td><code>routing opc NAME</code></td><td><code>add-tpm</code>, <code>add-workflow</code>, <code>compare-workflow</code>, <code>delete-tpm</code>, <code>update-tpm-priority</code></td></tr>
     <tr><td><code>routing list</code></td><td>show all commands</td></tr>
@@ -258,7 +256,7 @@ For reference:</p>
     <tr><td>opc/*.py</td><td>src/routing/opc/</td></tr>
   </tbody>
 </table></div>
-<p>Only <code>pre_uipath.py</code> is still kept at the root as a shim for UiPath / VBS.</p>
+<p><code>pre_uipath.py</code>, the last root shim for UiPath / VBS, was moved to <code>archive/</code> on 2026-11-27.</p>
 
 <script src="/libs/mermaid@10.9.6/mermaid.min.js"></script>
 <script>

@@ -266,7 +266,7 @@ Visual view of the same tree: [`structure.html`](structure.html).
 
 ```
 src/routing/
-  cli.py                        routing run | check | opc | pre-uipath | list
+  cli.py                        routing run | check | opc | list
   core/                         existing: config, Snowflake / SQL Server, Excel helpers
   data/                         existing: SQL only (Snowflake); + material.py (MARC status)
   checks/                       existing: stand-alone checks (still usable on their own)
@@ -310,7 +310,7 @@ src/routing/
     run.py          new         plan rows, run phases, safe_run, RunSummary (planner + runner in one)
     recipes.py      new         RECIPES (Action -> steps); PHASES order is in model/enums.py
     workbook.py     new         read rows, RESULT_ columns, Plan + Run log sheets, save after each row
-    pre_uipath.py               existing
+    (pre_uipath.py archived 2026-11-27 to archive/, UiPath no longer used)
 
   (planned) departments.py      DEPARTMENTS: per Dept its layouts + OpCenter rules (section 5.3)
   (planned) opc/rules.py        OpCenter rules per department (moved out of add_tpm.py)

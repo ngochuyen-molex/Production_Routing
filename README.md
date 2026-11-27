@@ -139,7 +139,7 @@ routing opc add-tpm | add-workflow | compare-workflow | delete-tpm |
 If FILE is left out you are asked for it (drag & drop works).
 
 `pv-exist` checks whether the production version for each row's routing (`group` + `group counter`,
-filled by `routing-condition` / `pre-uipath`) and `Alt Bom` already exists. It adds `PV_FOUND` and
+filled by `routing-condition`) and `Alt Bom` already exists. It adds `PV_FOUND` and
 `PV_CHECK` (`Exists` / `Missing`; `ALL BOM` rows are not checked yet, only listed) and writes back
 into FILE unless `-o` is given. Production version commands, rules and the open ALL BOM concern:
 [`docs/production_version.md`](docs/production_version.md).
@@ -156,11 +156,12 @@ efficiency / utilization. Rules, documented exceptions and known gaps:
 |---|---|
 | `src/routing/core/` | config (plant, connection name, paths), DB connections, cleaning, Excel I/O |
 | `src/routing/data/` | SQL queries only, one file per topic, return DataFrames |
-| `src/routing/checks/` | pre-UiPath checks (business logic) |
+| `src/routing/checks/` | stand-alone checks (business logic) |
 | `src/routing/opc/` | OpCenter upload-file generators, see `docs/opc.md` |
-| `src/routing/pipelines/` | chained checks (`pre_uipath`) |
+| `src/routing/pipelines/` | `routing run`: plan, phases, recipes, Excel results |
 | `src/routing/cli.py` | the `routing` command |
 | `sql/`, `notebooks/`, `docs/` | ad-hoc SQL, notebook, notes |
+| `archive/` | retired code kept for reference (`pre_uipath`), not importable |
 | `tests/` | `pytest` (no Snowflake needed) |
 | `output/` | generated Excel files (git-ignored) |
 
